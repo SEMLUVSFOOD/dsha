@@ -27,6 +27,9 @@ or the buttons.
 - **Easy setup**: a wizard finds your WiFi and your Home Assistant server,
   and you sign in from your phone (or the DS keyboard) with your normal
   account. No tokens to copy, no files to edit.
+- **Your own layout**: an optional Home Assistant integration adds a
+  *DS Dashboard* page to the sidebar where you drag and drop entities,
+  automations and scenes into the DS's pages, exactly how you want them.
 - **Offline demo mode** to try it without a server.
 - **Open source** (MIT), with desktop unit tests and a fake Home Assistant
   server for development.
@@ -37,6 +40,7 @@ or the buttons.
 - [Quick start](#quick-start)
 - [Controls](#controls)
 - [Supported entities](#supported-entities)
+- [Arrange your dashboard in Home Assistant](#arrange-your-dashboard-in-home-assistant)
 - [Configuration](docs/configuration.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Building from source](docs/building.md)
@@ -90,6 +94,25 @@ Assistant profile → *Security* → *Refresh tokens*.
 >   [configuration reference](docs/configuration.md). You can also paste a
 >   token in the phone sign in page.
 
+## Arrange your dashboard in Home Assistant
+
+Out of the box the DS shows all your supported entities, grouped by type. To
+choose exactly what goes where, install the **DSHA integration** for Home
+Assistant (via HACS or by hand). It adds a **DS Dashboard** page to the
+sidebar: drag entities, automations, scripts and scenes into the DS's pages,
+rename tiles, choose what a tap does, or create pages from your areas. Press
+**Save**, then **START** on the DS.
+
+<p align="center">
+  <img src="docs/screenshots/ha_panel.png" width="560" alt="DS Dashboard panel in Home Assistant">
+</p>
+<p align="center">
+  <img src="docs/screenshots/15_layout_living_room.png" width="220" alt="Layout on the DS">
+  <img src="docs/screenshots/16_layout_security.png" width="220" alt="Another page">
+</p>
+
+Installation and details: **[docs/integration.md](docs/integration.md)**.
+
 ## Controls
 
 | Input | Action |
@@ -100,7 +123,7 @@ Assistant profile → *Security* → *Refresh tokens*.
 | **A** | Main action of the selected entity (toggle, lock/unlock, play/pause...) |
 | **L / R** | Decrease / increase: brightness, temperature, volume, cover close/open, number value |
 | **Y** or ⟳ button | Refresh the entities on screen now |
-| **SELECT** or the middle button | Filter: All, Lights, Switches, Climate, Covers & locks, Media, Scenes & scripts, Sensors |
+| **SELECT** or the middle button | With a DS Dashboard layout: next page. Otherwise filter: All, Lights, Switches, Climate, Covers & locks, Media, Scenes & scripts, Sensors |
 | **◀ / ▶ buttons** | Previous / next page |
 | **X** | Info panel (server, IP, traffic, help). Press **A** there to sign in again or change server |
 | **START** | Reload all entities |
@@ -114,7 +137,7 @@ entity.
 | Domain | Shows | A | L / R |
 |---|---|---|---|
 | `light` | On/off and brightness | Toggle | Dim / brighten (10% steps) |
-| `switch`, `input_boolean`, `fan`, `automation`, `siren`, `humidifier` | On/off | Toggle | — |
+| `switch`, `input_boolean`, `fan`, `automation`, `siren`, `humidifier` | On/off | Toggle (automations: or *Run now*, set in the DS Dashboard panel) | — |
 | `climate` | Mode and current temperature, target, action | On/off | Target temperature −/+ |
 | `cover` | Open/closed and position | Toggle | Close / open |
 | `lock` | Locked/unlocked | Lock or unlock | — |
@@ -140,7 +163,8 @@ Entities from other domains are shown (read only) when you list them with
   guest network (ideally isolated, with only Home Assistant reachable).
 - **No `.local` names.** mDNS isn't supported; use the IP address (normal DNS
   names work).
-- At most 128 entities are shown. Use `entity=` or `domains=` to choose.
+- At most 128 entities are shown (16 pages with the integration). Use the
+  DS Dashboard panel, `entity=` or `domains=` to choose.
 - The display is refreshed by polling (not the WebSocket API), only for the
   entities on screen.
 
@@ -149,7 +173,9 @@ Entities from other domains are shown (read only) when you list them with
 The app has been tested with the desktop test suite (HTTP client, streaming
 parser, sign in, network discovery, phone setup page and UI logic against a
 fake Home Assistant server) and the real `.nds` has been run in an emulator
-(dashboard in demo mode, setup wizard screens and keyboard). The WiFi parts
+(dashboard and layout pages in demo mode, setup wizard screens and keyboard).
+The Home Assistant integration is tested inside a real Home Assistant core,
+and its panel in a browser (drag and drop included). The WiFi parts
 haven't been tried on real hardware yet. See the
 [changelog](CHANGELOG.md). Reports from real hardware are very welcome:
 please [open an issue](https://github.com/semluvsfood/dsha/issues) with your
@@ -157,7 +183,7 @@ console model and how you launched DSHA.
 
 <p align="center">
   <img src="docs/screenshots/emulator_welcome.png" width="256" alt="Setup running in DeSmuME">
-  <img src="docs/screenshots/emulator_tap.png" width="256" alt="Running in DeSmuME">
+  <img src="docs/screenshots/emulator_layout.png" width="256" alt="A layout page running in DeSmuME">
   <img src="docs/screenshots/03_brightness.png" width="256" alt="Dimming a light">
 </p>
 
@@ -169,7 +195,8 @@ as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
-DSHA is released under the [MIT license](LICENSE). The ROM includes libraries
+DSHA (the DS app and the Home Assistant integration) is released under the
+[MIT license](LICENSE). The ROM includes libraries
 from BlocksDS (libnds, DSWifi with lwIP and Mbed TLS) under their own
 licenses; see [licenses/](licenses/README.md).
 

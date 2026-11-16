@@ -14,6 +14,7 @@ void config_defaults(ha_config *cfg)
     memset(cfg, 0, sizeof(*cfg));
     cfg->port = 8123;
     cfg->refresh_seconds = 15;
+    cfg->use_layout = true;
     snprintf(cfg->title, sizeof(cfg->title), "Home Assistant");
 }
 
@@ -156,6 +157,10 @@ bool config_parse(ha_config *cfg, const char *text, char *err, size_t errlen)
             cfg->refresh_seconds = atoi(value);
         else if (strcmp(key, "entity") == 0 || strcmp(key, "entities") == 0)
             add_entities(cfg, value);
+        else if (strcmp(key, "use_layout") == 0 || strcmp(key, "layout") == 0)
+            cfg->use_layout = !(strcmp(value, "0") == 0
+                                || strcmp(value, "false") == 0
+                                || strcmp(value, "no") == 0);
         else if (strcmp(key, "demo") == 0)
             cfg->demo = atoi(value) != 0 || strcmp(value, "true") == 0
                         || strcmp(value, "yes") == 0;
@@ -242,6 +247,8 @@ size_t config_write(const ha_config *cfg, char *out, size_t out_len)
         cfg->refresh_seconds);
     if (cfg->domains[0])
         PUT("domains = %s\n", cfg->domains);
+    if (!cfg->use_layout)
+        PUT("use_layout = 0\n");
     if (cfg->num_entities > 0)
         PUT("\n");
     for (int i = 0; i < cfg->num_entities; i++)

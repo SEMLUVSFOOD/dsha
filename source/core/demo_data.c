@@ -52,3 +52,28 @@ const char demo_states_json[] =
     "on\",\"attributes\":{\"friendly_name\":\"Lights at sunset\"}},{\"entity_id\":\"b"
     "utton.restart_router\",\"state\":\"2026-11-01T10:00:00+00:00\",\"attributes\""
     ":{\"device_class\":\"restart\",\"friendly_name\":\"Restart router\"}}]";
+
+// Layout used by the demo, in the format of GET /api/dsha/layout (what the
+// DS Dashboard panel of the Home Assistant integration produces).
+const char demo_layout_json[] =
+    "{\"version\":1,\"revision\":1,\"title\":\"Demo house\",\"pages\":[{\"name\":\"Livin"
+    "g room\",\"tiles\":[{\"entity_id\":\"light.living_room\",\"name\":\"Ceiling\",\"ac"
+    "tion\":\"default\"},{\"entity_id\":\"light.hallway\",\"name\":\"\",\"action\":\"defa"
+    "ult\"},{\"entity_id\":\"media_player.kitchen_speaker\",\"name\":\"Speaker\",\"ac"
+    "tion\":\"default\"},{\"entity_id\":\"scene.movie_night\",\"name\":\"\",\"action\":\""
+    "default\"},{\"entity_id\":\"switch.coffee_machine\",\"name\":\"Coffee\",\"action"
+    "\":\"default\"},null,{\"entity_id\":\"sensor.outside_temperature\",\"name\":\"Ou"
+    "tside\",\"action\":\"default\"},{\"entity_id\":\"binary_sensor.back_door\",\"nam"
+    "e\":\"\",\"action\":\"default\"}]},{\"name\":\"Climate\",\"tiles\":[{\"entity_id\":\"c"
+    "limate.thermostat\",\"name\":\"\",\"action\":\"default\"},{\"entity_id\":\"sensor."
+    "humidity\",\"name\":\"\",\"action\":\"default\"},{\"entity_id\":\"weather.home\",\"n"
+    "ame\":\"Weather\",\"action\":\"default\"},{\"entity_id\":\"input_number.target\","
+    "\"name\":\"\",\"action\":\"default\"},null,null,null,null]},{\"name\":\"Security\""
+    ",\"tiles\":[{\"entity_id\":\"lock.front_door\",\"name\":\"\",\"action\":\"default\"}"
+    ",{\"entity_id\":\"cover.garage\",\"name\":\"\",\"action\":\"default\"},{\"entity_id"
+    "\":\"binary_sensor.hall_motion\",\"name\":\"\",\"action\":\"default\"},{\"entity_i"
+    "d\":\"person.sam\",\"name\":\"\",\"action\":\"none\"},{\"entity_id\":\"automation.li"
+    "ghts_at_sunset\",\"name\":\"Sunset lights\",\"action\":\"trigger\"},{\"entity_id"
+    "\":\"script.good_night\",\"name\":\"\",\"action\":\"default\"},{\"entity_id\":\"vacu"
+    "um.robot\",\"name\":\"\",\"action\":\"default\"},{\"entity_id\":\"button.restart_r"
+    "outer\",\"name\":\"\",\"action\":\"default\"}]}]}";

@@ -10,10 +10,16 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #define ENTITY_MAX 128
 
 #define ATTR_NONE (-1000000.0f) // Marker of "attribute not present"
+
+// What tapping a tile does (chosen in the DS Dashboard panel)
+#define TILE_ACTION_DEFAULT 0
+#define TILE_ACTION_TRIGGER 1 // automation.trigger instead of toggle
+#define TILE_ACTION_NONE    2 // Read only
 
 typedef enum {
     DOM_OTHER = 0,
@@ -60,6 +66,10 @@ typedef struct {
     float volume;              // media_player: 0-1
     float position;            // cover: 0-100
     char extra[48];            // media_player title, hvac_action, etc.
+
+    // From the DS Dashboard panel (Home Assistant integration)
+    char custom_name[48]; // Name chosen in the panel ("" = friendly name)
+    uint8_t tile_action;  // TILE_ACTION_*
 
     bool dimmable;     // light: supports brightness
     bool loaded;       // Data received from the server at least once

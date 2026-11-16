@@ -160,7 +160,17 @@ static void commit_entity(ha_state_parser *sp)
         dst = &ha->entities[ha->count++];
     }
 
+    // Keep the settings from the DS Dashboard panel
+    char custom_name[sizeof(dst->custom_name)];
+    snprintf(custom_name, sizeof(custom_name), "%s", dst->custom_name);
+    uint8_t tile_action = dst->tile_action;
+
     *dst = *cur;
+
+    snprintf(dst->custom_name, sizeof(dst->custom_name), "%s", custom_name);
+    dst->tile_action = tile_action;
+    if (custom_name[0] != '\0')
+        set_str(dst->name, sizeof(dst->name), custom_name);
 }
 
 static void begin_entity(ha_state_parser *sp)
@@ -484,8 +494,249 @@ void ha_sort(ha_client *ha)
           compare_entities);
 }
 
+// Layout of the DS Dashboard panel
+// --------------------------------
+
+typedef struct {
+    ha_client *ha;
+    json_parser json;
+    bool started;
+    bool in_pages, in_tiles, in_tile;
+    char key1[16], key3[16], key5[16];
+    int slot;
+    int tiles;
+    char tile_id[64], tile_name[48], tile_action[12];
+} layout_parser;
+
+static layout_parser lp;
+
+static void layout_reset(ha_client *ha)
+{
+    ha->count = 0;
+    ha->skipped = 0;
+    ha->num_pages = 0;
+    ha->layout_title[0] = '\0';
+}
+
+static void layout_add_tile(layout_parser *p)
+{
+    ha_client *ha = p->ha;
+    if (ha->num_pages == 0 || p->slot >= LAYOUT_SLOTS || p->tile_id[0] == '\0')
+        return;
+
+    ha_entity *e = find_entity(ha, p->tile_id);
+    if (e == NULL)
+    {
+        if (ha->count >= ENTITY_MAX)
+        {
+            ha->skipped++;
+            return;
+        }
+        e = &ha->entities[ha->count++];
+        entity_init(e, p->tile_id);
+        if (p->tile_name[0] != '\0')
+        {
+            set_str(e->custom_name, sizeof(e->custom_name), p->tile_name);
+            set_str(e->name, sizeof(e->name), p->tile_name);
+        }
+        if (strcmp(p->tile_action, "trigger") == 0)
+            e->tile_action = TILE_ACTION_TRIGGER;
+        else if (strcmp(p->tile_action, "none") == 0)
+            e->tile_action = TILE_ACTION_NONE;
+    }
+
+    ha->pages[ha->num_pages - 1].slots[p->slot] = (int16_t)(e - ha->entities);
+    p->tiles++;
+}
+
+static void layout_cb(void *user, json_event ev, const char *value, int depth)
+{
+    layout_parser *p = user;
+    ha_client *ha = p->ha;
+
+    switch (ev)
+    {
+        case JSON_EV_KEY:
+            if (depth == 1)
+                set_str(p->key1, sizeof(p->key1), value);
+            else if (depth == 3)
+                set_str(p->key3, sizeof(p->key3), value);
+            else if (depth == 5)
+                set_str(p->key5, sizeof(p->key5), value);
+            return;
+
+        case JSON_EV_ARRAY_START:
+            if (depth == 1 && strcmp(p->key1, "pages") == 0)
+                p->in_pages = true;
+            else if (depth == 3 && p->in_pages && strcmp(p->key3, "tiles") == 0)
+            {
+                p->in_tiles = true;
+                p->slot = 0;
+            }
+            return;
+
+        case JSON_EV_ARRAY_END:
+            if (depth == 1)
+                p->in_pages = false;
+            else if (depth == 3)
+                p->in_tiles = false;
+            return;
+
+        case JSON_EV_OBJECT_START:
+            if (depth == 2 && p->in_pages)
+            {
+                if (ha->num_pages < LAYOUT_MAX_PAGES)
+                {
+                    ha_page *page = &ha->pages[ha->num_pages++];
+                    snprintf(page->name, sizeof(page->name), "Page %d",
+                             ha->num_pages);
+                    for (int i = 0; i < LAYOUT_SLOTS; i++)
+                        page->slots[i] = -1;
+                }
+                else
+                {
+                    p->in_pages = false; // Ignore extra pages
+                }
+            }
+            else if (depth == 4 && p->in_tiles)
+            {
+                p->in_tile = true;
+                p->tile_id[0] = p->tile_name[0] = p->tile_action[0] = '\0';
+            }
+            return;
+
+        case JSON_EV_OBJECT_END:
+            if (depth == 4 && p->in_tile)
+            {
+                layout_add_tile(p);
+                p->in_tile = false;
+                p->slot++;
+            }
+            return;
+
+        default:
+            break;
+    }
+
+    // Values
+    if (depth == 1 && strcmp(p->key1, "title") == 0 && ev == JSON_EV_STRING)
+        set_str(ha->layout_title, sizeof(ha->layout_title), value);
+    else if (depth == 3 && p->in_pages && strcmp(p->key3, "name") == 0
+             && ev == JSON_EV_STRING && ha->num_pages > 0)
+        set_str(ha->pages[ha->num_pages - 1].name,
+                sizeof(ha->pages[0].name), value);
+    else if (depth == 4 && p->in_tiles && ev == JSON_EV_NULL)
+        p->slot++; // Empty slot
+    else if (depth == 5 && p->in_tile && ev == JSON_EV_STRING)
+    {
+        if (strcmp(p->key5, "entity_id") == 0)
+            set_str(p->tile_id, sizeof(p->tile_id), value);
+        else if (strcmp(p->key5, "name") == 0)
+            set_str(p->tile_name, sizeof(p->tile_name), value);
+        else if (strcmp(p->key5, "action") == 0)
+            set_str(p->tile_action, sizeof(p->tile_action), value);
+    }
+}
+
+static void layout_begin(ha_client *ha)
+{
+    memset(&lp, 0, sizeof(lp));
+    lp.ha = ha;
+    json_init(&lp.json, layout_cb, &lp);
+}
+
+static bool layout_data_cb(void *user, const char *data, size_t len)
+{
+    layout_parser *p = user;
+    if (!p->started)
+    {
+        // Only reset the entities when a layout is really received
+        layout_reset(p->ha);
+        p->started = true;
+    }
+    return json_feed(&p->json, data, len);
+}
+
+bool ha_parse_layout(ha_client *ha, const char *json)
+{
+    layout_begin(ha);
+    return layout_data_cb(&lp, json, strlen(json)) && json_finish(&lp.json)
+           && lp.tiles > 0;
+}
+
+// Puts back the configured entities after a failed or empty layout
+static void restore_entities(ha_client *ha, const ha_config *cfg)
+{
+    ha->layout_mode = false;
+    ha->num_pages = 0;
+    ha->count = 0;
+    ha->layout_title[0] = '\0';
+    if (cfg != NULL && !ha->auto_mode)
+    {
+        for (int i = 0; i < cfg->num_entities && i < ENTITY_MAX; i++)
+            entity_init(&ha->entities[i], cfg->entities[i]);
+        ha->count = cfg->num_entities < ENTITY_MAX ? cfg->num_entities
+                                                   : ENTITY_MAX;
+    }
+}
+
+// Returns 1 if a layout has been loaded, 0 if there is no layout (the
+// integration isn't installed, or the layout is empty) and -1 on error.
+static int load_layout(ha_client *ha, const ha_config *cfg)
+{
+    layout_begin(ha);
+
+    http_result res;
+    if (!ha_http(ha, "GET", "/api/dsha/layout", NULL, layout_data_cb, &lp,
+                 &res))
+    {
+        ha->last_status = 0;
+        set_str(ha->error, sizeof(ha->error), res.error);
+        if (lp.started)
+            restore_entities(ha, cfg);
+        return -1;
+    }
+    if (res.status == 404)
+        return 0; // The integration isn't installed: normal mode
+    if (!status_ok(ha, &res))
+        return -1;
+
+    if (!json_finish(&lp.json) || lp.tiles == 0)
+    {
+        // Broken or empty layout (nothing arranged in the panel yet)
+        restore_entities(ha, cfg);
+        return 0;
+    }
+    ha->layout_mode = true;
+    return 1;
+}
+
+bool ha_refresh_page(ha_client *ha, int page)
+{
+    char path[48];
+    if (ha->demo)
+        return true;
+    snprintf(path, sizeof(path), "/api/dsha/states?page=%d", page);
+    return fetch_states(ha, NULL, path, false, NULL, NULL);
+}
+
 static bool demo_load(ha_client *ha, const ha_config *cfg)
 {
+    // The demo shows a layout like the one made in the DS Dashboard panel
+    if (cfg != NULL && cfg->use_layout && ha_parse_layout(ha, demo_layout_json))
+    {
+        ha->layout_mode = true;
+        ha_state_parser *sp = ha_parser_begin(ha, NULL, false);
+        if (!ha_parser_feed(sp, demo_states_json, strlen(demo_states_json))
+            || !ha_parser_end(sp))
+        {
+            set_str(ha->error, sizeof(ha->error), "Invalid demo data");
+            return false;
+        }
+        return true;
+    }
+    ha->layout_mode = false;
+
     // In manual mode only the configured entities are updated
     ha_state_parser *sp = ha_parser_begin(ha, cfg, ha->auto_mode);
     if (ha->auto_mode)
@@ -602,6 +853,23 @@ bool ha_load_all(ha_client *ha, const ha_config *cfg, ha_progress_cb progress,
 {
     if (ha->demo)
         return demo_load(ha, cfg);
+
+    if (cfg != NULL && cfg->use_layout)
+    {
+        int r = load_layout(ha, cfg);
+        if (r < 0)
+            return false;
+        if (r > 0)
+        {
+            // All the states of the layout in one small request
+            if (!fetch_states(ha, NULL, "/api/dsha/states", false, progress,
+                              user))
+                return false;
+            ha->error[0] = '\0';
+            return true;
+        }
+    }
+    ha->layout_mode = false;
 
     if (ha->auto_mode)
     {

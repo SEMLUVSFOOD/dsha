@@ -98,6 +98,24 @@ class State:
             return [copy.deepcopy(s)]
 
 
+DS_ATTRIBUTES = {
+    "friendly_name", "unit_of_measurement", "device_class", "brightness",
+    "supported_color_modes", "current_temperature", "temperature",
+    "target_temp_step", "min_temp", "max_temp", "min", "max", "step",
+    "volume_level", "current_position", "media_title", "hvac_action",
+    "temperature_unit",
+}
+
+
+def compact_state(state, eid):
+    """Like the DSHA integration: only the attributes the DS uses."""
+    if state is None:
+        return {"entity_id": eid, "state": "unavailable", "attributes": {}}
+    return {"entity_id": eid, "state": state["state"],
+            "attributes": {k: v for k, v in state["attributes"].items()
+                           if k in DS_ATTRIBUTES}}
+
+
 class Auth:
     """Login flow and tokens, like homeassistant/components/auth."""
 
@@ -178,6 +196,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/":
             self.send_json(200, {"message": "API running."})
+        elif self.path.startswith("/api/dsha/"):
+            self.dsha_get()
         elif self.path == "/api/states":
             self.send_json(200, self.server.state.all())
         elif self.path.startswith("/api/states/"):
@@ -188,6 +208,34 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, s)
         else:
             self.send_json(404, {"message": "Not found"})
+
+    def dsha_get(self):
+        """Endpoints of the DSHA integration (custom_components/dsha)."""
+        layout = self.server.layout
+        if layout is None:
+            self.send_json(404, {"message": "Not found"})
+            return
+        if self.path == "/api/dsha/layout":
+            self.send_json(200, dict(layout, version=1))
+            return
+        if self.path.startswith("/api/dsha/states"):
+            pages = layout["pages"]
+            if "?page=" in self.path:
+                n = int(self.path.split("?page=")[1])
+                if not 0 <= n < len(pages):
+                    self.send_json(400, {"message": "Invalid page"})
+                    return
+                pages = [pages[n]]
+            ids = []
+            for page in pages:
+                for tile in page["tiles"]:
+                    if tile and tile["entity_id"] not in ids:
+                        ids.append(tile["entity_id"])
+            self.server.dsha_state_requests += 1
+            self.send_json(200, [compact_state(self.server.state.get(i), i)
+                                 for i in ids])
+            return
+        self.send_json(404, {"message": "Not found"})
 
     def auth_post(self, raw):
         auth = self.server.auth
@@ -279,6 +327,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # Test hooks
+        if self.path == "/test/set_layout":
+            self.server.layout = json.loads(raw)  # null = not installed
+            self.send_json(200, {})
+            return
         if self.path == "/test/expire_access_tokens":
             with auth.lock:
                 auth.access.clear()
@@ -320,6 +372,10 @@ def make_server(bind, port, mode="length", quiet=True, fixture=None):
     httpd = ThreadingHTTPServer((bind, port), Handler)
     httpd.state = State(fixture or os.path.join(HERE, "fixtures", "states.json"))
     httpd.auth = Auth()
+    httpd.layout = None  # The DSHA integration isn't installed by default
+    httpd.dsha_state_requests = 0
+    with open(os.path.join(HERE, "fixtures", "layout.json"), encoding="utf-8") as f:
+        httpd.example_layout = json.load(f)
     httpd.mode = mode
     httpd.quiet = quiet
     httpd.daemon_threads = True
@@ -333,9 +389,13 @@ def main():
     ap.add_argument("--mode", choices=["length", "chunked", "close"],
                     default="length", help="How responses are framed")
     ap.add_argument("--fixture", help="JSON file with the states")
+    ap.add_argument("--layout", action="store_true",
+                    help="Act as if the DSHA integration was installed")
     args = ap.parse_args()
     httpd = make_server(args.bind, args.port, args.mode, quiet=False,
                         fixture=args.fixture)
+    if args.layout:
+        httpd.layout = httpd.example_layout
     print(f"Fake Home Assistant on http://{args.bind}:{args.port} "
           f"(token: {TOKEN})")
     httpd.serve_forever()

@@ -18,6 +18,55 @@ jobs:
       - name: Run unit and network tests
         run: make -C tests test
 
+  integration:
+    name: Home Assistant integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Home Assistant test harness
+        run: |
+          pip install pytest-homeassistant-custom-component
+          pip install "$(python -c 'import json,os,homeassistant.components.frontend as f; print(json.load(open(os.path.join(os.path.dirname(f.__file__), "manifest.json")))["requirements"][0])')"
+      - name: Run tests
+        run: make test-integration
+
+  panel:
+    name: DS Dashboard panel (browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Run test
+        run: make test-panel
+
+  hassfest:
+    name: Validate integration (hassfest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: Validate HACS repository
+    runs-on: ubuntu-latest
+    # Repository settings (topics, description, brand icons) are checked too;
+    # don't block the build on them.
+    continue-on-error: true
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands
+
   build:
     name: Build dsha.nds
     runs-on: ubuntu-latest
@@ -40,7 +89,7 @@ jobs:
   release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [tests, build]
+    needs: [tests, integration, panel, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -49,14 +98,20 @@ jobs:
         with:
           name: dsha
           path: dsha
+      - uses: actions/checkout@v4
+        with:
+          path: src
       - name: Package
         run: |
           cd dsha
           zip -r ../dsha-${GITHUB_REF_NAME}.zip .
+          cd ../src/custom_components
+          zip -r ../../dsha-ha-integration-${GITHUB_REF_NAME}.zip dsha
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dsha/dsha.nds
             dsha/config.example.ini
             dsha-${{ github.ref_name }}.zip
+            dsha-ha-integration-${{ github.ref_name }}.zip
           generate_release_notes: true

@@ -36,7 +36,7 @@ DOCKER_IMAGE	?= skylyrac/blocksds:slim-v1.25.0
 
 .DEFAULT_GOAL := all
 
-.PHONY: docker test screenshots
+.PHONY: docker test screenshots test-integration test-panel
 
 docker:
 	docker run --rm -v "$(CURDIR)":/work -w /work -u $$(id -u):$$(id -g) \
@@ -48,4 +48,21 @@ test:
 screenshots:
 	$(MAKE) -C tests screenshots
 
+# Home Assistant integration (needs pytest-homeassistant-custom-component)
+PYTHON		?= python3
+test-integration:
+	$(PYTHON) -m pytest -q -p no:cacheprovider -c tests_ha/pytest.ini tests_ha
+
+# DS Dashboard panel in Chromium (needs node and playwright)
+test-panel:
+	node tests/panel/test_panel.js
+
+# The DS build needs BlocksDS; the other targets (tests) work without it
+ifneq ($(wildcard $(BLOCKSDS)/sys/default_makefiles/rom_arm9/Makefile),)
 include $(BLOCKSDS)/sys/default_makefiles/rom_arm9/Makefile
+else
+all:
+	@echo "BlocksDS wasn't found in $(BLOCKSDS)."
+	@echo "Install it, or build with Docker: make docker"
+	@false
+endif

@@ -26,9 +26,25 @@ Everyone taking part is expected to follow the
 See [docs/building.md](docs/building.md). In short:
 
 ```sh
-make docker   # builds dsha.nds
-make test     # runs the desktop tests (gcc + python3)
+make docker            # builds dsha.nds
+make test              # desktop tests of the DS app (gcc + python3)
+make test-integration  # Home Assistant integration tests (see below)
+make test-panel        # browser test of the DS Dashboard panel (node + Playwright)
 ```
+
+The integration tests need a Python 3.13 virtual environment with
+`pytest-homeassistant-custom-component` and the `home-assistant-frontend`
+version required by that Home Assistant release:
+
+```sh
+python3 -m venv .venv && . .venv/bin/activate
+pip install pytest-homeassistant-custom-component
+pip install "$(python -c 'import json,os,homeassistant.components.frontend as f; print(json.load(open(os.path.join(os.path.dirname(f.__file__), "manifest.json")))["requirements"][0])')"
+make test-integration
+```
+
+The panel test needs Node.js and Playwright (`npm install playwright &&
+npx playwright install chromium`).
 
 Most of the code is in `source/core` and runs on a PC, so you can develop and
 test UI and network changes without a DS. [docs/architecture.md](docs/architecture.md)

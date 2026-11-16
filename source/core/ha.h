@@ -10,11 +10,21 @@
 #define DSHA_HA_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "auth.h"
 #include "config.h"
 #include "entity.h"
 #include "http.h"
+
+// Layout from the DS Dashboard panel (Home Assistant integration)
+#define LAYOUT_MAX_PAGES 16
+#define LAYOUT_SLOTS 8
+
+typedef struct {
+    char name[24];
+    int16_t slots[LAYOUT_SLOTS]; // Index in ha_client.entities, -1 = empty
+} ha_page;
 
 typedef struct {
     http_client http;
@@ -32,6 +42,12 @@ typedef struct {
     int skipped;
     bool auto_mode;
     bool demo; // Offline demo: no network, actions are simulated
+
+    // Layout mode: the integration is installed and has a layout
+    bool layout_mode;
+    char layout_title[32];
+    int num_pages;
+    ha_page pages[LAYOUT_MAX_PAGES];
 
     char error[128]; // Last error message
     int last_status; // Last HTTP status
@@ -51,6 +67,13 @@ bool ha_load_all(ha_client *ha, const ha_config *cfg, ha_progress_cb progress,
 
 // Refreshes the state of one entity
 bool ha_refresh(ha_client *ha, ha_entity *e);
+
+// Layout mode: refreshes all the entities of a page with one request
+bool ha_refresh_page(ha_client *ha, int page);
+
+// Parses the JSON of GET /api/dsha/layout and builds the pages and entity
+// list. Exposed for the tests.
+bool ha_parse_layout(ha_client *ha, const char *json);
 
 // Runs an action on an entity (toggle, brightness...). The new state returned
 // by Home Assistant is applied to the entity list.

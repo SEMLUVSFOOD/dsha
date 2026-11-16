@@ -43,6 +43,7 @@ file. The wizard saves to the file that was loaded, or to `sd:/dsha/config.ini`
 | `refresh_seconds` | `15` | How often the entities on screen are refreshed. `0` disables auto refresh (press Y to refresh). |
 | `entity` | *(none)* | An entity to show. Repeat the line for more entities, or list several separated by commas. They are shown in this order. Up to 128. |
 | `domains` | *(all)* | Only used when there are no `entity` lines: comma separated list of the domains to show, like `light, switch, climate`. |
+| `use_layout` | `1` | Use the layout of the DS Dashboard panel when the [Home Assistant integration](integration.md) is installed. `0` ignores it. |
 | `demo` | `0` | `1` starts an offline demo with fake entities. No WiFi or server needed. |
 
 Either `token` or `refresh_token` is required (the wizard writes
@@ -52,6 +53,13 @@ Either `token` or `refresh_token` is required (the wizard writes
 `url`, `ssid`, `password`, `entities` and `refresh` are accepted as aliases of
 `host`, `wifi_ssid`, `wifi_password`, `entity` and `refresh_seconds`. A line
 with only an entity id (like `light.kitchen`) is treated as an `entity` line.
+
+## Which entities are shown
+
+1. If the [DSHA integration](integration.md) is installed in Home Assistant and
+   its layout has at least one tile: **that layout** (unless `use_layout = 0`).
+2. Otherwise, if there are `entity` lines: **that list**.
+3. Otherwise: **all supported entities** (automatic mode).
 
 ## Automatic mode vs entity list
 

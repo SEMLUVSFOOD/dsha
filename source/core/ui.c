@@ -98,7 +98,9 @@ static void draw_header(app_t *app, color_t *fb)
 {
     gfx_rect(fb, 0, 0, GFX_W, 18, C_PANEL);
     draw_house(fb, 4, 2, C_ACCENT);
-    gfx_text(fb, 22, 5, app->cfg->title, C_TEXT, 1, 160);
+    gfx_text(fb, 22, 5,
+             app->ha->layout_title[0] ? app->ha->layout_title : app->cfg->title,
+             C_TEXT, 1, 160);
 
     char clock[8];
     snprintf(clock, sizeof(clock), "%02d:%02d", app->hour, app->minute);
@@ -170,7 +172,15 @@ static void draw_entity_details(app_t *app, color_t *fb)
         return;
     }
 
-    ha_entity *e = &app->ha->entities[app->list[app->selected]];
+    ha_entity *e = app_entity_at(app, app->selected);
+    if (e == NULL)
+    {
+        gfx_text_centered(fb, 0, 60, GFX_W, "Empty slot", C_MUTED, 2);
+        gfx_text_wrap(fb, 24, 90, GFX_W - 48, 4, 11,
+                      "Put something here with the DS Dashboard panel in "
+                      "Home Assistant.", C_MUTED, 1);
+        return;
+    }
     color_t dc = domain_color(e->domain);
     char state[64], buf[64];
 
@@ -261,7 +271,8 @@ static void draw_info_panel(app_t *app, color_t *fb)
     detail_line(fb, &y, "DS IP", app->ip);
     snprintf(buf, sizeof(buf), "%d%s (%s)", app->ha->count,
              app->ha->skipped ? "+" : "",
-             app->ha->auto_mode ? "auto" : "config");
+             app->ha->layout_mode ? "DS Dashboard"
+             : app->ha->auto_mode ? "auto" : "config");
     detail_line(fb, &y, "Entities", buf);
     snprintf(buf, sizeof(buf), "%lu req, %lu KB",
              (unsigned long)app->ha->http.requests,
@@ -278,7 +289,9 @@ static void draw_info_panel(app_t *app, color_t *fb)
     y += 10;
     gfx_text(fb, 10, y, "L/R dim, temp, volume", C_MUTED, 1, 0);
     y += 10;
-    gfx_text(fb, 10, y, "Y refresh  SELECT filter", C_MUTED, 1, 0);
+    gfx_text(fb, 10, y, app->ha->layout_mode ? "Y refresh  SELECT next page"
+                                             : "Y refresh  SELECT filter",
+             C_MUTED, 1, 0);
     y += 10;
     gfx_text(fb, 10, y, "START reload all", C_MUTED, 1, 0);
     y += 12;
@@ -298,9 +311,10 @@ static void draw_top_dashboard(app_t *app, color_t *fb)
     // Button legend
     gfx_rect(fb, 0, 166, GFX_W, 26, C_PANEL);
     int x = 4;
-    if (app->list_count > 0 && !app->info_visible)
+    ha_entity *sel = app_entity_at(app, app->selected);
+    if (sel != NULL && !app->info_visible)
     {
-        ha_entity *e = &app->ha->entities[app->list[app->selected]];
+        ha_entity *e = sel;
         draw_legend_item(fb, &x, 168, "A", entity_action_label(e, ACT_PRIMARY));
         draw_legend_item(fb, &x, 168, "L",
                          entity_action_label(e, ACT_DECREASE));
@@ -310,15 +324,29 @@ static void draw_top_dashboard(app_t *app, color_t *fb)
     x = 4;
     draw_legend_item(fb, &x, 181, "Y", "Refresh");
     draw_legend_item(fb, &x, 181, "X", app->info_visible ? "Entity" : "Info");
-    draw_legend_item(fb, &x, 181, "SEL", "Filter");
+    draw_legend_item(fb, &x, 181, "SEL",
+                     app->ha->layout_mode ? "Page" : "Filter");
 
     draw_toast(app, fb, 150);
 }
 
 static void draw_tile(app_t *app, color_t *fb, int list_index, int x, int y)
 {
-    ha_entity *e = &app->ha->entities[app->list[list_index]];
+    ha_entity *e = app_entity_at(app, list_index);
     bool selected = list_index == app->selected;
+
+    if (e == NULL)
+    {
+        // Empty slot of the layout
+        gfx_frame(fb, x + 2, y + 2, TILE_W - 4, TILE_H - 4, C_PANEL);
+        if (selected)
+        {
+            gfx_frame(fb, x, y, TILE_W, TILE_H, C_WHITE);
+            gfx_frame(fb, x + 1, y + 1, TILE_W - 2, TILE_H - 2, C_WHITE);
+        }
+        return;
+    }
+
     bool on = entity_is_on(e);
     bool unavailable = entity_is_unavailable(e);
     color_t dc = domain_color(e->domain);
@@ -425,7 +453,7 @@ static void draw_bottom_dashboard(app_t *app, color_t *fb)
     draw_arrow(fb, 24, y + h / 2, -1, C_TEXT);
 
     gfx_round_rect(fb, 48, y, 110, h, C_PANEL);
-    gfx_text_centered(fb, 50, y + 4, 106, app_filter_name(app->filter),
+    gfx_text_centered(fb, 50, y + 4, 106, app_page_title(app),
                       C_TEXT, 1);
     char buf[24];
     snprintf(buf, sizeof(buf), "%d/%d", page + 1, pages);

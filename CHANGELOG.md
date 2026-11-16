@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0 — 2026-11-16
+
+- New **Home Assistant integration** (`custom_components/dsha`, installable
+  with HACS) that adds a **DS Dashboard** panel to the sidebar:
+  - Drag and drop entities, automations, scripts and scenes into the DS's
+    pages (8 tiles per page, empty slots allowed), with mouse or touch.
+  - Rename tiles, choose what a tap does (default, trigger automation, read
+    only), reorder and rename pages, create pages from areas.
+- The DS uses the layout automatically when the integration is installed:
+  page names, custom names, "Run now" for automations, and one request per
+  page refresh.
+- `use_layout = 0` in `config.ini` ignores the layout.
+- The demo shows a layout with three pages.
+
 ## 1.1.0 — 2026-11-16
 
 Setup is now as easy as we could make it: no config file or token needed.

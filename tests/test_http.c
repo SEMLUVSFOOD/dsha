@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
     CHECK(!ha_action(&ha, e, ACT_PRIMARY));
 
     uint32_t requests = ha.http.requests;
-    CHECK(requests == 8);
+    CHECK(requests == 9); // Includes the layout request (404: not installed)
     printf("  %u requests, %u reconnects, %u bytes\n", ha.http.requests,
            ha.http.reconnects, ha.http.bytes_received);
     http_client_close(&ha.http);
@@ -178,6 +178,84 @@ int main(int argc, char *argv[])
         printf("  revoked: %s\n", ha.error);
 
         http_client_close(&ha.http);
+        http_client_close(&hc);
+    }
+
+    // DS Dashboard layout (custom_components/dsha installed)
+    // ----------------------------------------------------
+    {
+        static http_client hc;
+        http_client_init(&hc, host, port);
+        http_result r;
+        char body[8192];
+        FILE *f = fopen("fixtures/layout.json", "rb");
+        size_t n = f ? fread(body, 1, sizeof(body) - 1, f) : 0;
+        if (f)
+            fclose(f);
+        body[n] = '\0';
+        CHECK(n > 0);
+
+        // Not installed: normal (automatic) mode
+        setup(host, port, "testtoken", "");
+        CHECK(ha_load_all(&ha, &cfg, NULL, NULL));
+        CHECK(!ha.layout_mode);
+        CHECK(ha.count == 22);
+        http_client_close(&ha.http);
+
+        CHECK(http_request(&hc, "POST", "/test/set_layout", NULL, body, NULL,
+                           NULL, &r) && r.status == 200);
+
+        // Installed: the pages of the panel, with a manual list in the config
+        // (the layout wins)
+        setup(host, port, "testtoken", "entity=sensor.humidity\n");
+        uint32_t before = ha.http.requests;
+        CHECK(ha_load_all(&ha, &cfg, NULL, NULL));
+        CHECK(ha.layout_mode);
+        CHECK(ha.http.requests - before == 2); // Layout + all states
+        CHECK(ha.num_pages == 3);
+        CHECK(ha.count == 19);
+        CHECK_STR(ha.layout_title, "Demo house");
+        ha_entity *e = find("light.living_room");
+        CHECK_STR(e->name, "Ceiling");
+        CHECK(e->loaded && strcmp(e->state, "on") == 0);
+        CHECK(e->brightness > 0);
+
+        // A whole page is refreshed with one request
+        before = ha.http.requests;
+        CHECK(ha_refresh_page(&ha, 2));
+        CHECK(ha.http.requests - before == 1);
+        CHECK(!ha_refresh_page(&ha, 9)); // Bad page
+
+        // Trigger an automation (instead of toggling it)
+        e = find("automation.lights_at_sunset");
+        CHECK(e->tile_action == TILE_ACTION_TRIGGER);
+        CHECK(!ha_action(&ha, e, ACT_PRIMARY)); // fake_ha has no "trigger"
+        CHECK(strstr(ha.error, "automation.trigger") != NULL);
+        http_client_close(&ha.http);
+
+        // use_layout = 0 ignores it
+        setup(host, port, "testtoken", "use_layout=0\n");
+        CHECK(ha_load_all(&ha, &cfg, NULL, NULL));
+        CHECK(!ha.layout_mode);
+        CHECK(ha.count == 22);
+        http_client_close(&ha.http);
+
+        // An empty layout (nothing arranged yet) falls back too, and the
+        // configured entities are kept
+        CHECK(http_request(&hc, "POST", "/test/set_layout", NULL,
+                           "{\"title\":\"\",\"pages\":[{\"name\":\"Home\","
+                           "\"tiles\":[null,null,null,null,null,null,null,null]}]}",
+                           NULL, NULL, &r) && r.status == 200);
+        setup(host, port, "testtoken", "entity=sensor.humidity\n");
+        CHECK(ha_load_all(&ha, &cfg, NULL, NULL));
+        CHECK(!ha.layout_mode);
+        CHECK(ha.count == 1);
+        CHECK(strcmp(ha.entities[0].id, "sensor.humidity") == 0);
+        CHECK(ha.entities[0].loaded);
+        http_client_close(&ha.http);
+
+        CHECK(http_request(&hc, "POST", "/test/set_layout", NULL, "null",
+                           NULL, NULL, &r) && r.status == 200);
         http_client_close(&hc);
     }
 

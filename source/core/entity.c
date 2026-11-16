@@ -150,8 +150,11 @@ static bool has_number_range(const ha_entity *e)
 
 const char *entity_action_label(const ha_entity *e, entity_action a)
 {
-    if (entity_is_unavailable(e))
+    if (entity_is_unavailable(e) || e->tile_action == TILE_ACTION_NONE)
         return NULL;
+
+    if (e->tile_action == TILE_ACTION_TRIGGER && e->domain == DOM_AUTOMATION)
+        return a == ACT_PRIMARY ? "Run now" : NULL;
 
     switch (e->domain)
     {
@@ -269,6 +272,9 @@ bool entity_build_service(const ha_entity *e, entity_action a,
         case DOM_SIREN:
         case DOM_HUMIDIFIER:
             svc = "toggle";
+            if (e->domain == DOM_AUTOMATION
+                && e->tile_action == TILE_ACTION_TRIGGER)
+                svc = "trigger";
             break;
 
         case DOM_COVER:

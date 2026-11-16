@@ -68,10 +68,39 @@ static int count_filter(const app_t *app, app_filter f)
     return n;
 }
 
+const char *app_page_title(const app_t *app)
+{
+    if (app->ha->layout_mode)
+    {
+        int page = app->selected / TILES_PER_PAGE;
+        if (page < app->ha->num_pages)
+            return app->ha->pages[page].name;
+    }
+    return filter_names[app->filter];
+}
+
+ha_entity *app_entity_at(const app_t *app, int list_index)
+{
+    if (list_index < 0 || list_index >= app->list_count)
+        return NULL;
+    int idx = app->list[list_index];
+    return idx >= 0 ? &app->ha->entities[idx] : NULL;
+}
+
 static void build_list(app_t *app)
 {
     app->list_count = 0;
-    for (int i = 0; i < app->ha->count; i++)
+
+    if (app->ha->layout_mode)
+    {
+        // The pages of the DS Dashboard panel, empty slots included
+        for (int p = 0; p < app->ha->num_pages; p++)
+        {
+            for (int i = 0; i < TILES_PER_PAGE && i < LAYOUT_SLOTS; i++)
+                app->list[app->list_count++] = app->ha->pages[p].slots[i];
+        }
+    }
+    else for (int i = 0; i < app->ha->count; i++)
     {
         if (filter_match(app->filter, app->ha->entities[i].domain))
             app->list[app->list_count++] = i;
@@ -113,6 +142,7 @@ void app_show_dashboard(app_t *app)
     build_list(app);
     app->last_refresh_ms = app->now_ms;
     app->refresh_count = 0;
+    app->page_refresh_pending = false;
     app->queued_entity = -1;
     app->recheck_entity = -1;
     app->dirty = true;
@@ -143,6 +173,8 @@ static void queue_action(app_t *app, int list_index, entity_action a)
     if (list_index < 0 || list_index >= app->list_count)
         return;
     int idx = app->list[list_index];
+    if (idx < 0)
+        return; // Empty slot
     ha_entity *e = &app->ha->entities[idx];
 
     if (!entity_has_action(e, a))
@@ -160,8 +192,17 @@ static void queue_action(app_t *app, int list_index, entity_action a)
     app->dirty = true;
 }
 
+static void change_page(app_t *app, int delta);
+
 static void next_filter(app_t *app)
 {
+    // With a layout, the button goes to the next page instead
+    if (app->ha->layout_mode)
+    {
+        change_page(app, 1);
+        return;
+    }
+
     // Skip groups without entities
     for (int i = 1; i <= FILTER_COUNT; i++)
     {
@@ -320,8 +361,8 @@ static void handle_touch(app_t *app, const app_input *in)
         // Short tap: run the main action. Long press: only select.
         if ((int32_t)(app->now_ms - app->touch_start_ms) < LONG_PRESS_MS)
         {
-            ha_entity *e = &app->ha->entities[app->list[idx]];
-            if (entity_has_action(e, ACT_PRIMARY))
+            ha_entity *e = app_entity_at(app, idx);
+            if (e != NULL && entity_has_action(e, ACT_PRIMARY))
                 queue_action(app, idx, ACT_PRIMARY);
         }
     }
@@ -331,12 +372,22 @@ static void start_page_refresh(app_t *app)
 {
     int page = app->selected / TILES_PER_PAGE;
     app->refresh_count = 0;
+
+    if (app->ha->layout_mode)
+    {
+        app->page_refresh_pending = true;
+        app->page_refresh_page = page;
+        app->last_refresh_ms = app->now_ms;
+        return;
+    }
+
     for (int i = 0; i < TILES_PER_PAGE; i++)
     {
         int li = page * TILES_PER_PAGE + i;
         if (li >= app->list_count)
             break;
-        app->refresh_queue[app->refresh_count++] = app->list[li];
+        if (app->list[li] >= 0)
+            app->refresh_queue[app->refresh_count++] = app->list[li];
     }
     app->last_refresh_ms = app->now_ms;
 }
@@ -376,6 +427,15 @@ static void network_step(app_t *app)
         if (!ha_refresh(ha, e))
             app_toast(app, ha->error, true);
         e->pending = false;
+        app->dirty = true;
+        return;
+    }
+
+    if (app->page_refresh_pending)
+    {
+        app->page_refresh_pending = false;
+        if (!ha_refresh_page(ha, app->page_refresh_page))
+            app_toast(app, ha->error, true);
         app->dirty = true;
         return;
     }

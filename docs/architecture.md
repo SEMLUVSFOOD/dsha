@@ -21,7 +21,14 @@ source/
 │   └── platform.h      What a platform must provide (yield, milliseconds)
 └── nds/
     └── main.c          DS entry point: video, input, WiFi, SD card, main loop
+custom_components/dsha/ Home Assistant integration (Python)
+├── __init__.py         Panel registration, websocket and REST API
+├── layout.py           Layout validation and storage
+├── config_flow.py      "Add integration" dialog
+└── frontend/dsha-panel.js  The DS Dashboard panel (web component, no build)
 tests/                  Desktop tests, fake Home Assistant, screenshot renderer
+tests/panel/            Browser test of the panel (Playwright)
+tests_ha/               Integration tests inside a real Home Assistant core
 ```
 
 ## Design choices
@@ -92,6 +99,24 @@ refresh token when a request returns 401 and repeats the request. Because the
 HTTP client only passes the body of 2xx responses to callbacks, the retry
 doesn't confuse the streaming parsers.
 
+## DS Dashboard layouts
+
+With the integration installed, `ha_load_all()` first requests
+`/api/dsha/layout`. A 404 means it isn't installed and the normal modes are
+used. Otherwise the layout is streamed into `ha_client.pages` (16 pages of 8
+slots holding entity indices, -1 for empty slots), custom names and tap
+actions are stored in the entities (`custom_name`, `tile_action`) and survive
+state updates, and the states come from `/api/dsha/states` in one request.
+The app's list is then the slots of all pages in order, so the existing
+paging, touch and drawing code works unchanged; empty slots are drawn as an
+outline and have no actions. Page refreshes use `/api/dsha/states?page=N`.
+
+The panel (`dsha-panel.js`) is a plain custom element: Home Assistant passes
+it the `hass` object, it reads/writes the layout with websocket commands and
+renders with `innerHTML`. Drag and drop uses pointer events (mouse and touch)
+and `shadowRoot.elementFromPoint()` to find the drop target. State changes
+only update the state texts, so typing and dragging aren't disturbed.
+
 ## Home Assistant API usage
 
 | Request | When |
@@ -100,6 +125,8 @@ doesn't confuse the streaming parsers.
 | `POST /auth/login_flow`, `POST /auth/login_flow/<id>` | Setup: sign in (and two-factor code) |
 | `POST /auth/token` | Exchange the sign in code for tokens; renew the access token |
 | `GET /api/` | At start: checks address and token |
+| `GET /api/dsha/layout` | At start/reload: the DS Dashboard layout (404 = not installed) |
+| `GET /api/dsha/states[?page=N]` | Layout mode: states of all/one page in one request |
 | `GET /api/states` | At start/reload in automatic mode |
 | `GET /api/states/<entity_id>` | At start in manual mode, page refreshes, 1.5 s after an action |
 | `POST /api/services/<domain>/<service>` | Actions. The response (list of changed states) is applied right away |

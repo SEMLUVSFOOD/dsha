@@ -17,7 +17,7 @@
 #include "ha.h"
 #include "widgets.h"
 
-#define DSHA_VERSION "1.1.0"
+#define DSHA_VERSION "1.2.0"
 
 // Logical buttons (the platform maps hardware keys to these)
 enum {
@@ -103,6 +103,8 @@ typedef struct {
     uint32_t last_refresh_ms;
     int refresh_queue[TILES_PER_PAGE];
     int refresh_count;
+    bool page_refresh_pending; // Layout mode: one request per page
+    int page_refresh_page;
 
     // Entity to re-check shortly after an action
     int recheck_entity;
@@ -158,5 +160,11 @@ void app_show_keyboard(app_t *app);
 void app_show_picker(app_t *app);
 
 const char *app_filter_name(app_filter f);
+
+// Text of the middle footer button: the filter, or the page name in layout
+// mode. Also tells if the list index holds an entity (layout mode can have
+// empty slots).
+const char *app_page_title(const app_t *app);
+ha_entity *app_entity_at(const app_t *app, int list_index);
 
 #endif // DSHA_APP_H

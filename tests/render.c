@@ -234,6 +234,28 @@ int main(int argc, char *argv[])
     app_draw(&app, top, bottom);
     save("14_setup_code");
 
+    // Layout from the DS Dashboard panel (the demo uses one)
+    {
+        static ha_config dcfg;
+        static ha_client dha;
+        config_defaults(&dcfg);
+        config_parse(&dcfg, "demo=1\nrefresh_seconds=0\n", err, sizeof(err));
+        ha_init(&dha, &dcfg);
+        ha_load_all(&dha, &dcfg, NULL, NULL);
+        app_init(&app, &dcfg, &dha);
+        app.hour = 9;
+        app.minute = 41;
+        app.wifi_quality = 3;
+        app_show_dashboard(&app);
+        frames(2, 0);
+        save("15_layout_living_room");
+        frames(2, IN_SELECT);
+        frames(2, IN_SELECT);
+        frames(2, IN_DOWN);
+        frames(2, IN_DOWN);
+        save("16_layout_security");
+    }
+
     printf("render: ok, %u requests\n", ha.http.requests);
     return 0;
 }

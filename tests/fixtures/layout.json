@@ -1,0 +1,121 @@
+{
+  "revision": 1,
+  "title": "Demo house",
+  "pages": [
+    {
+      "name": "Living room",
+      "tiles": [
+        {
+          "entity_id": "light.living_room",
+          "name": "Ceiling",
+          "action": "default"
+        },
+        {
+          "entity_id": "light.hallway",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "media_player.kitchen_speaker",
+          "name": "Speaker",
+          "action": "default"
+        },
+        {
+          "entity_id": "scene.movie_night",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "switch.coffee_machine",
+          "name": "Coffee",
+          "action": "default"
+        },
+        null,
+        {
+          "entity_id": "sensor.outside_temperature",
+          "name": "Outside",
+          "action": "default"
+        },
+        {
+          "entity_id": "binary_sensor.back_door",
+          "name": "",
+          "action": "default"
+        }
+      ]
+    },
+    {
+      "name": "Climate",
+      "tiles": [
+        {
+          "entity_id": "climate.thermostat",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "sensor.humidity",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "weather.home",
+          "name": "Weather",
+          "action": "default"
+        },
+        {
+          "entity_id": "input_number.target",
+          "name": "",
+          "action": "default"
+        },
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "name": "Security",
+      "tiles": [
+        {
+          "entity_id": "lock.front_door",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "cover.garage",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "binary_sensor.hall_motion",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "person.sam",
+          "name": "",
+          "action": "none"
+        },
+        {
+          "entity_id": "automation.lights_at_sunset",
+          "name": "Sunset lights",
+          "action": "trigger"
+        },
+        {
+          "entity_id": "script.good_night",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "vacuum.robot",
+          "name": "",
+          "action": "default"
+        },
+        {
+          "entity_id": "button.restart_router",
+          "name": "",
+          "action": "default"
+        }
+      ]
+    }
+  ]
+}

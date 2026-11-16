@@ -36,6 +36,10 @@ typedef struct {
 
     // Offline demo with fake entities (no WiFi or server needed)
     bool demo;
+
+    // Use the layout of the DS Dashboard panel if the integration is
+    // installed (default). 0 = ignore it.
+    bool use_layout;
 } ha_config;
 
 void config_defaults(ha_config *cfg);

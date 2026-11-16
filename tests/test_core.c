@@ -349,9 +349,32 @@ static void test_demo(void)
     ha_init(&ha, &cfg);
     CHECK(ha_check(&ha));
     CHECK(ha_load_all(&ha, &cfg, NULL, NULL));
-    CHECK(ha.count == 22);
 
-    ha_entity *e = find(&ha, "switch.coffee_machine");
+    // The demo uses a layout like the one of the DS Dashboard panel
+    CHECK(ha.layout_mode);
+    CHECK(ha.count == 19);
+    CHECK(ha.num_pages == 3);
+    CHECK_STR(ha.pages[0].name, "Living room");
+    CHECK_STR(ha.pages[2].name, "Security");
+    CHECK(ha.pages[0].slots[5] == -1);     // Empty slot
+    CHECK(ha.pages[1].slots[4] == -1);
+    CHECK_STR(ha.layout_title, "Demo house");
+
+    ha_entity *e = find(&ha, "light.living_room");
+    CHECK_STR(e->name, "Ceiling");         // Custom name...
+    CHECK(e->brightness == 191.0f);        // ...and the real state
+
+    char dom[32], svc[32], body[192];
+    e = find(&ha, "automation.lights_at_sunset");
+    CHECK(e->tile_action == TILE_ACTION_TRIGGER);
+    CHECK_STR(entity_action_label(e, ACT_PRIMARY), "Run now");
+    CHECK(entity_build_service(e, ACT_PRIMARY, dom, sizeof(dom), svc,
+                               sizeof(svc), body, sizeof(body)));
+    CHECK_STR(svc, "trigger");
+    e = find(&ha, "person.sam");
+    CHECK(!entity_has_action(e, ACT_PRIMARY)); // Read only
+
+    e = find(&ha, "switch.coffee_machine");
     CHECK(ha_action(&ha, e, ACT_PRIMARY));
     CHECK_STR(e->state, "off");
     e = find(&ha, "light.living_room");
@@ -361,6 +384,15 @@ static void test_demo(void)
     CHECK(ha_action(&ha, e, ACT_PRIMARY));
     CHECK_STR(e->state, "unlocked");
     CHECK(ha.http.requests == 0);
+
+    // Without the layout: all the supported entities
+    static ha_client ha2;
+    config_defaults(&cfg);
+    CHECK(config_parse(&cfg, "demo=1\nuse_layout=0\n", err, sizeof(err)));
+    ha_init(&ha2, &cfg);
+    CHECK(ha_load_all(&ha2, &cfg, NULL, NULL));
+    CHECK(!ha2.layout_mode);
+    CHECK(ha2.count == 22);
 }
 
 // Touch handling of the dashboard, with simulated time
@@ -411,7 +443,31 @@ static void test_touch(void)
     CHECK(app.queued_entity == app.list[2]);
     touch_frame(&app, false, 0, 0, &t); // Runs the action
     CHECK(app.queued_entity == -1);
-    CHECK_STR(ha.entities[app.list[2]].state, "off");
+    CHECK_STR(ha.entities[app.list[2]].state, "paused"); // The speaker
+
+    // Tapping an empty slot of the layout only selects it
+    touch_frame(&app, true, 190, 100, &t);
+    touch_frame(&app, false, 0, 0, &t);
+    CHECK(app.selected == 5);
+    CHECK(app.list[5] == -1);
+    CHECK(app.queued_entity == -1);
+    CHECK_STR(app_page_title(&app), "Living room");
+
+    // SELECT goes to the next page of the layout
+    {
+        app_input in = { 0 };
+        in.down = IN_SELECT;
+        t += 17;
+        app_update(&app, &in, t);
+        CHECK_STR(app_page_title(&app), "Climate");
+        in.down = IN_SELECT;
+        t += 17;
+        app_update(&app, &in, t);
+        in.down = IN_SELECT;
+        t += 17;
+        app_update(&app, &in, t);
+        CHECK_STR(app_page_title(&app), "Living room");
+    }
 
     // Long press on the 1st tile only selects it
     for (int i = 0; i < 40; i++)
