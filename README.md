@@ -1,5 +1,9 @@
 # DSHA — Home Assistant for the Nintendo DS
 
+[![CI](https://github.com/semluvsfood/dsha/actions/workflows/ci.yml/badge.svg)](https://github.com/semluvsfood/dsha/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform: Nintendo DS](https://img.shields.io/badge/platform-Nintendo%20DS%20%7C%20DSi%20%7C%203DS-red.svg)](#requirements)
+
 Control your smart home from a Nintendo DS. DSHA is a native `.nds` homebrew
 app that talks directly to your [Home Assistant](https://www.home-assistant.io/)
 server over WiFi: toggle lights, dim them, change the thermostat, open the
@@ -37,7 +41,7 @@ or the buttons.
 - [Troubleshooting](docs/troubleshooting.md)
 - [Building from source](docs/building.md)
 - [How it works](docs/architecture.md)
-- [Contributing](CONTRIBUTING.md)
+- [Contributing](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md)
 
 ## Requirements
 
@@ -156,6 +160,12 @@ console model and how you launched DSHA.
   <img src="docs/screenshots/emulator_tap.png" width="256" alt="Running in DeSmuME">
   <img src="docs/screenshots/03_brightness.png" width="256" alt="Dimming a light">
 </p>
+
+## Contributing
+
+Bug reports, hardware test reports and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md). Please report security problems privately
+as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

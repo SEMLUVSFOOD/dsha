@@ -14,7 +14,12 @@ Please include:
 - The exact message on screen (a photo is great).
 - Your Home Assistant version.
 
-**Never post your token.** Replace it with `xxx` if you share your config.
+**Never post your token** (`token` or `refresh_token`). Replace it with `xxx`
+if you share your config. Security problems go through a private report, see
+[SECURITY.md](SECURITY.md).
+
+Everyone taking part is expected to follow the
+[code of conduct](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
