@@ -65,5 +65,23 @@ entity domain.
   changes, run it longer: `tests/build/fuzz 5000000`.
 - Update the docs and `CHANGELOG.md` if users will notice the change.
 
+## Releases
+
+Releases are built and published by CI when a `v*` tag is pushed:
+
+1. Set the new version in `source/core/app.h` (`DSHA_VERSION`) and
+   `custom_components/dsha/manifest.json`, and add a `## x.y.z — date`
+   section to `CHANGELOG.md`.
+2. Commit, then tag and push:
+
+   ```sh
+   git tag -a v1.2.3 -m "DSHA v1.2.3"
+   git push origin main v1.2.3
+   ```
+
+CI checks that the tag matches both versions and the changelog, runs all
+tests, builds `dsha.nds` and creates the GitHub release with the changelog
+section as release notes. HACS picks up the new release automatically.
+
 By contributing you agree that your contributions are licensed under the MIT
 license of the project.

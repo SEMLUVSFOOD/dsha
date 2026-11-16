@@ -68,7 +68,7 @@ Assistant user name and password; no token or config file needed.
 ## Quick start
 
 **1. Copy `dsha.nds` to your SD card.** Download it from the
-[Releases page](https://github.com/semluvsfood/dsha/releases) (or
+[latest release](https://github.com/semluvsfood/dsha/releases/latest) (or
 [build it yourself](docs/building.md)).
 
 **2. Start it** from your flashcart menu or TWiLight Menu++ and tap

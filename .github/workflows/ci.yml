@@ -121,6 +121,35 @@ jobs:
         with:
           path: src
           persist-credentials: false
+      - name: Check the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          grep -q "DSHA_VERSION \"$version\"" src/source/core/app.h || {
+            echo "::error::$TAG doesn't match DSHA_VERSION in source/core/app.h"; exit 1; }
+          grep -q "\"version\": \"$version\"" src/custom_components/dsha/manifest.json || {
+            echo "::error::$TAG doesn't match the version in manifest.json"; exit 1; }
+          grep -q "^## $version " src/CHANGELOG.md || {
+            echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
+      - name: Release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          awk -v v="${TAG#v}" '
+            /^## / { if (found) exit; if (index($0, "## " v " ") == 1) { found = 1; next } }
+            found' src/CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ---
+
+          **Downloads**
+
+          - `dsha.nds`: the DS app. Copy it to your SD card (see the README).
+          - `dsha-ha-integration-*.zip`: the optional Home Assistant
+            integration (DS Dashboard panel). Easier: install it with HACS.
+          - `dsha-*.zip`: the app with the example config, licenses and docs.
+          EOF
       - name: Package
         run: |
           cd dsha
@@ -133,6 +162,6 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --title "DSHA $TAG" --generate-notes \
+            --title "DSHA $TAG" --notes-file notes.md \
             dsha/dsha.nds dsha/config.example.ini \
             "dsha-$TAG.zip" "dsha-ha-integration-$TAG.zip"
