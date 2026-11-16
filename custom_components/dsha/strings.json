@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "DSHA Nintendo DS Dashboard",
+        "description": "Adds a \"DS Dashboard\" page to the sidebar where you arrange what your Nintendo DS shows. Start DSHA on the DS and it picks up your layout."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "DSHA is already set up."
+    }
+  }
+}

@@ -1,0 +1,487 @@
+[
+  {
+    "entity_id": "sun.sun",
+    "state": "above_horizon",
+    "attributes": {
+      "next_dawn": "2026-11-17T06:50:00+00:00",
+      "elevation": 12.3,
+      "rising": true,
+      "friendly_name": "Sun"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "light.living_room",
+    "state": "on",
+    "attributes": {
+      "min_color_temp_kelvin": 2202,
+      "max_color_temp_kelvin": 6535,
+      "supported_color_modes": [
+        "color_temp",
+        "hs"
+      ],
+      "color_mode": "color_temp",
+      "brightness": 191,
+      "hs_color": [
+        27.2,
+        56.5
+      ],
+      "rgb_color": [
+        255,
+        177,
+        110
+      ],
+      "xy_color": [
+        0.5,
+        0.38
+      ],
+      "effect_list": null,
+      "friendly_name": "Living room ceiling",
+      "supported_features": 40
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "light.hallway",
+    "state": "off",
+    "attributes": {
+      "supported_color_modes": [
+        "onoff"
+      ],
+      "color_mode": null,
+      "friendly_name": "Hallway",
+      "supported_features": 0
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "light.kitchen_counter",
+    "state": "off",
+    "attributes": {
+      "supported_color_modes": [
+        "brightness"
+      ],
+      "brightness": null,
+      "friendly_name": "K\u00fcche \u00e9clairage \u2728",
+      "supported_features": 32
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "switch.coffee_machine",
+    "state": "on",
+    "attributes": {
+      "friendly_name": "Coffee machine",
+      "icon": "mdi:coffee"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "input_boolean.guest_mode",
+    "state": "off",
+    "attributes": {
+      "editable": true,
+      "friendly_name": "Guest mode"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "climate.thermostat",
+    "state": "heat",
+    "attributes": {
+      "hvac_modes": [
+        "off",
+        "heat",
+        "auto"
+      ],
+      "min_temp": 7,
+      "max_temp": 35,
+      "target_temp_step": 0.5,
+      "current_temperature": 20.5,
+      "temperature": 21.5,
+      "hvac_action": "heating",
+      "friendly_name": "Thermostat",
+      "supported_features": 385
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "cover.garage",
+    "state": "closed",
+    "attributes": {
+      "current_position": 0,
+      "device_class": "garage",
+      "friendly_name": "Garage door",
+      "supported_features": 15
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "lock.front_door",
+    "state": "locked",
+    "attributes": {
+      "friendly_name": "Front door",
+      "supported_features": 0
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "media_player.kitchen_speaker",
+    "state": "playing",
+    "attributes": {
+      "volume_level": 0.35,
+      "is_volume_muted": false,
+      "media_title": "Bohemian \"Rhapsody\"",
+      "media_artist": "Queen",
+      "friendly_name": "Kitchen speaker",
+      "supported_features": 152463
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "sensor.outside_temperature",
+    "state": "7.849999",
+    "attributes": {
+      "state_class": "measurement",
+      "unit_of_measurement": "\u00b0C",
+      "device_class": "temperature",
+      "friendly_name": "Outside temperature"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "sensor.humidity",
+    "state": "64",
+    "attributes": {
+      "unit_of_measurement": "%",
+      "device_class": "humidity",
+      "friendly_name": "Humidity"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "binary_sensor.back_door",
+    "state": "on",
+    "attributes": {
+      "device_class": "door",
+      "friendly_name": "Back door"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "binary_sensor.hall_motion",
+    "state": "off",
+    "attributes": {
+      "device_class": "motion",
+      "friendly_name": "Hall motion"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "scene.movie_night",
+    "state": "2026-11-15T20:00:00.000000+00:00",
+    "attributes": {
+      "entity_id": [
+        "light.living_room"
+      ],
+      "friendly_name": "Movie night"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "script.good_night",
+    "state": "off",
+    "attributes": {
+      "last_triggered": null,
+      "mode": "single",
+      "current": 0,
+      "friendly_name": "Good night"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "person.sam",
+    "state": "home",
+    "attributes": {
+      "editable": true,
+      "id": "sam",
+      "latitude": 50.9,
+      "longitude": 5.3,
+      "gps_accuracy": 12,
+      "source": "device_tracker.phone",
+      "user_id": "abc",
+      "device_trackers": [
+        "device_tracker.phone"
+      ],
+      "friendly_name": "Sam"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "weather.home",
+    "state": "partlycloudy",
+    "attributes": {
+      "temperature": 8.2,
+      "temperature_unit": "\u00b0C",
+      "humidity": 80,
+      "forecast": [
+        {
+          "datetime": "2026-11-17",
+          "temperature": 9,
+          "condition": "rainy"
+        }
+      ],
+      "friendly_name": "Forecast Home"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "input_number.target",
+    "state": "42.0",
+    "attributes": {
+      "initial": null,
+      "editable": true,
+      "min": 0.0,
+      "max": 100.0,
+      "step": 1.0,
+      "mode": "slider",
+      "friendly_name": "Target value"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "update.core",
+    "state": "off",
+    "attributes": {
+      "installed_version": "2026.11.1",
+      "friendly_name": "Core update"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "zone.home",
+    "state": "0",
+    "attributes": {
+      "latitude": 1,
+      "longitude": 2,
+      "radius": 100,
+      "friendly_name": "Home"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "fan.bedroom",
+    "state": "unavailable",
+    "attributes": {
+      "restored": true,
+      "friendly_name": "Bedroom fan",
+      "supported_features": 1
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "vacuum.robot",
+    "state": "docked",
+    "attributes": {
+      "battery_level": 100,
+      "friendly_name": "Robbie"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "automation.lights_at_sunset",
+    "state": "on",
+    "attributes": {
+      "id": "1690000000000",
+      "last_triggered": "2026-11-15T16:30:00+00:00",
+      "mode": "single",
+      "current": 0,
+      "friendly_name": "Lights at sunset"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  },
+  {
+    "entity_id": "button.restart_router",
+    "state": "2026-11-01T10:00:00+00:00",
+    "attributes": {
+      "device_class": "restart",
+      "friendly_name": "Restart router"
+    },
+    "last_changed": "2026-11-16T09:12:44.123456+00:00",
+    "last_reported": "2026-11-16T09:12:44.123456+00:00",
+    "last_updated": "2026-11-16T09:12:44.123456+00:00",
+    "context": {
+      "id": "01JD0000000000000000000000",
+      "parent_id": null,
+      "user_id": null
+    }
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "domain": "dsha",
+  "name": "DSHA Nintendo DS Dashboard",
+  "codeowners": ["@semluvsfood"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/semluvsfood/dsha/blob/main/docs/integration.md",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/semluvsfood/dsha/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "1.2.0"
+}

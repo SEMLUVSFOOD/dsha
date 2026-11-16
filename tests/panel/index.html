@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- Test page: loads the real panel with a fake "hass" object. -->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DS Dashboard panel test</title>
+<style>html,body{margin:0;height:100%;background:#111827}</style>
+</head>
+<body>
+<script type="module">
+import "../../custom_components/dsha/frontend/dsha-panel.js";
+
+const states = {};
+const add = (id, state, attrs = {}) => {
+  states[id] = { entity_id: id, state, attributes: attrs };
+};
+add("light.living_room", "on", { friendly_name: "Living room ceiling" });
+add("light.hallway", "off", { friendly_name: "Hallway" });
+add("light.kitchen", "on", { friendly_name: "Kitchen" });
+add("switch.coffee_machine", "on", { friendly_name: "Coffee machine" });
+add("climate.thermostat", "heat", { friendly_name: "Thermostat" });
+add("automation.lights_at_sunset", "on", { friendly_name: "Lights at sunset" });
+add("script.good_night", "off", { friendly_name: "Good night" });
+add("scene.movie_night", "2026-11-16", { friendly_name: "Movie night" });
+add("sensor.outside_temperature", "7.8", { friendly_name: "Outside temperature", unit_of_measurement: "°C" });
+add("lock.front_door", "locked", { friendly_name: "Front door" });
+add("cover.garage", "closed", { friendly_name: "Garage door" });
+add("media_player.kitchen_speaker", "playing", { friendly_name: "Kitchen speaker" });
+add("update.core", "off", { friendly_name: "Core update" }); // Unsupported
+// Hostile names: must be shown as text, never run
+add("switch.xss", "on", { friendly_name: '<img src=x onerror="window.pwned=1">"><script>window.pwned=2<\/script>' });
+
+window.saved = [];
+let layout = { title: "", revision: 0,
+  pages: [{ name: "Home", tiles: [null, null, null, null, null, null, null, null] }] };
+
+window.hass = {
+  states,
+  areas: {
+    kitchen: { area_id: "kitchen", name: "Kitchen" },
+    evil: { area_id: 'x"><img src=x onerror="window.pwned=3">', name: '<svg onload="window.pwned=4">' },
+  },
+  devices: { dev1: { id: "dev1", area_id: "kitchen" } },
+  entities: {
+    "light.kitchen": { entity_id: "light.kitchen", area_id: "kitchen" },
+    "media_player.kitchen_speaker": { entity_id: "media_player.kitchen_speaker", device_id: "dev1" },
+    "sensor.outside_temperature": { entity_id: "sensor.outside_temperature", device_id: "dev1", entity_category: "diagnostic" },
+  },
+  async callWS(msg) {
+    if (msg.type === "dsha/layout/get") return JSON.parse(JSON.stringify(layout));
+    if (msg.type === "dsha/layout/save") {
+      window.saved.push(JSON.parse(JSON.stringify(msg.layout)));
+      layout = { ...JSON.parse(JSON.stringify(msg.layout)), revision: layout.revision + 1 };
+      return JSON.parse(JSON.stringify(layout));
+    }
+    throw new Error("unknown " + msg.type);
+  },
+};
+
+const panel = document.createElement("dsha-panel");
+panel.hass = window.hass;
+panel.narrow = false;
+document.body.appendChild(panel);
+window.panel = panel;
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Build output
+/build/
+*.nds
+*.elf
+*.map
+*.dump
+compile_commands.json
+
+# Desktop tests
+/tests/build/
+
+# Your personal config (it contains your Home Assistant token!)
+/nitrofs/config.ini
+/config.ini
+/dsha.ini
+
+# SD card images for emulators
+*.img
+image.bin
+/sdroot/
+
+__pycache__/
+*.pyc
+.DS_Store
+
+# Tooling
+node_modules/
+.venv/
