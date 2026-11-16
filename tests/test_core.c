@@ -15,6 +15,7 @@
 #include "ha.h"
 #include "json_get.h"
 #include "json_stream.h"
+#include "validate.h"
 #include "testlib.h"
 
 static char *read_file(const char *path, size_t *len)
@@ -206,7 +207,7 @@ static void test_states(void)
     entity_format_state(e, s, sizeof(s));
     CHECK_STR(s, "Off");
 
-    e = find(&ha, "light.k\xC3\xBC" "che");
+    e = find(&ha, "light.kitchen_counter");
     CHECK(e != NULL && e->dimmable && e->brightness == ATTR_NONE);
     CHECK_STR(e->name, "K\xC3\xBC" "che \xC3\xA9" "clairage \xE2\x9C\xA8");
 
@@ -655,6 +656,68 @@ static void test_picker(void)
     CHECK(p.chosen == 1);
 }
 
+static void test_security(void)
+{
+    // Validators
+    CHECK(valid_entity_id("light.living_room"));
+    CHECK(!valid_entity_id("light.a/../../api"));
+    CHECK(!valid_entity_id("light.a\r\nX: 1"));
+    CHECK(!valid_entity_id("light.a b"));
+    CHECK(!valid_entity_id("light.a.b"));
+    CHECK(!valid_entity_id("Light.a"));
+    CHECK(valid_host("192.168.1.2") && valid_host("homeassistant.lan"));
+    CHECK(!valid_host("evil.com\r\nX-Injected: 1"));
+    CHECK(!valid_host("a/b") && !valid_host("") && !valid_host("-a"));
+    CHECK(valid_token("abc.def_ghi-123"));
+    CHECK(!valid_token("abc\r\nX: y") && !valid_token("a b") && !valid_token(""));
+    CHECK(is_private_ipv4(0xC0A80102));  // 192.168.1.2
+    CHECK(is_private_ipv4(0x0A000001));  // 10.0.0.1
+    CHECK(is_private_ipv4(0xAC1F0001));  // 172.31.0.1
+    CHECK(!is_private_ipv4(0xAC200001)); // 172.32.0.1
+    CHECK(is_private_ipv4(0x64400001));  // 100.64.0.1 (Tailscale)
+    CHECK(!is_private_ipv4(0x08080808)); // 8.8.8.8
+
+    // A WiFi name chosen by a neighbour can't inject lines in config.ini
+    static ha_config a, b;
+    static char buf[4096];
+    char err[96];
+    config_defaults(&a);
+    snprintf(a.host, sizeof(a.host), "192.168.1.2");
+    snprintf(a.token, sizeof(a.token), "good");
+    snprintf(a.wifi_ssid, sizeof(a.wifi_ssid), "Free\nhost = 6.6.6.6");
+    snprintf(a.title, sizeof(a.title), "x\rtoken = evil");
+    config_write(&a, buf, sizeof(buf));
+    config_defaults(&b);
+    CHECK(config_parse(&b, buf, err, sizeof(err)));
+    CHECK_STR(b.host, "192.168.1.2");
+    CHECK_STR(b.token, "good");
+
+    // Hostile config values are rejected
+    config_defaults(&b);
+    CHECK(!config_parse(&b, "host=a b\ntoken=x\n", err, sizeof(err)));
+    config_defaults(&b);
+    CHECK(config_parse(&b, "host=h\ntoken=x\nentity=light.a/../b\n"
+                           "entity=light.ok\n", err, sizeof(err)));
+    CHECK(b.num_entities == 1);
+
+    // Invalid entity ids from the server are ignored
+    static ha_client ha;
+    config_defaults(&b);
+    config_parse(&b, "host=h\ntoken=x\n", err, sizeof(err));
+    ha_init(&ha, &b);
+    ha_state_parser *sp = ha_parser_begin(&ha, &b, true);
+    const char *doc = "[{\"entity_id\":\"light.a\\r\\nX: y\",\"state\":\"on\"},"
+                      "{\"entity_id\":\"light.ok\",\"state\":\"on\"}]";
+    CHECK(ha_parser_feed(sp, doc, strlen(doc)) && ha_parser_end(sp));
+    CHECK(ha.count == 1);
+    CHECK(ha_parse_layout(&ha, "{\"pages\":[{\"name\":\"p\",\"tiles\":["
+                               "{\"entity_id\":\"light.x/../../api\"},"
+                               "{\"entity_id\":\"light.good\"}]}]}"));
+    CHECK(ha.count == 1);
+    CHECK_STR(ha.entities[0].id, "light.good");
+    CHECK(ha.pages[0].slots[0] == -1);
+}
+
 int main(void)
 {
     test_json();
@@ -668,5 +731,6 @@ int main(void)
     test_config_write();
     test_keyboard();
     test_picker();
+    test_security();
     TEST_REPORT("test_core");
 }

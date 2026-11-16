@@ -10,9 +10,19 @@ Tap *Type the address* and enter the IP (*Settings → System → Network* in Ho
 Assistant shows it), adding `:port` if it isn't 8123.
 
 **The phone page doesn't open** — The phone must be on the same WiFi network
-as the DS. Type the address exactly as shown, starting with `http://` (not
+as the DS (some routers isolate wireless devices from each other; then use
+*Type on the DS*). Type the address exactly as shown, starting with `http://` (not
 `https://`). Some browsers try HTTPS first; if you get a security warning,
 choose to continue to the site. You can always tap *Type on the DS* instead.
+
+**"Wrong code"** — Type the 6 digits shown on the DS's top screen in the
+first box of the page. After 5 wrong tries the DS shows a new code.
+
+**"... isn't on your local network"** — DSHA only connects to local addresses
+(like `192.168.x.x` or `10.x.x.x`), because the connection isn't encrypted and
+your credentials would cross the internet in clear text. Use the local IP of
+Home Assistant. See `allow_public_server` in the
+[configuration reference](configuration.md) for special cases.
 
 **"Wrong user name or password"** — Use your Home Assistant **user name**,
 which can be different from the display name: check it in *Settings →

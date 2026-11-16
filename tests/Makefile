@@ -4,11 +4,13 @@
 # python3 (for the fake Home Assistant server).
 
 CC      ?= gcc
+# Set SANITIZE= (empty) to build without sanitizers (used by CodeQL)
+SANITIZE ?= -fsanitize=address,undefined -fno-omit-frame-pointer
 CFLAGS  ?= -O1 -g -Wall -Wextra -Wno-unused-parameter -std=gnu11 \
-           -fsanitize=address,undefined -fno-omit-frame-pointer \
            -Wno-format-truncation
-CFLAGS  += -I../source/core
-LDFLAGS ?= -fsanitize=address,undefined
+CFLAGS  += $(SANITIZE) -I../source/core -DDSHA_TESTING
+LDFLAGS ?=
+LDFLAGS += $(SANITIZE)
 
 CORE    := $(filter-out ../source/core/platform_nds.c,$(wildcard ../source/core/*.c))
 COMMON  := $(CORE) host_platform.c
@@ -17,7 +19,7 @@ BUILD   := build
 
 .PHONY: all test clean screenshots
 
-all: $(BUILD)/test_core $(BUILD)/test_http $(BUILD)/test_discover $(BUILD)/test_setup $(BUILD)/render
+all: $(BUILD)/test_core $(BUILD)/test_http $(BUILD)/test_discover $(BUILD)/test_setup $(BUILD)/fuzz $(BUILD)/render
 
 $(BUILD)/%: %.c $(COMMON) $(wildcard ../source/core/*.h) testlib.h
 	@mkdir -p $(BUILD)
@@ -25,6 +27,7 @@ $(BUILD)/%: %.c $(COMMON) $(wildcard ../source/core/*.h) testlib.h
 
 test: all
 	$(BUILD)/test_core
+	$(BUILD)/fuzz 300000
 	python3 run_http_tests.py $(BUILD)/test_http
 	python3 run_http_tests.py --discover $(BUILD)/test_discover
 	python3 run_http_tests.py --setup $(BUILD)/test_setup

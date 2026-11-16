@@ -28,9 +28,19 @@ typedef enum {
     SETUP_STATE_DONE,     // Signed in
 } setup_state;
 
+// Wrong pairing codes allowed before a new code is generated
+#define SETUP_MAX_CODE_ATTEMPTS 5
+
 typedef struct {
     int listen_fd;
     int port;
+
+    // Pairing code shown on the DS. The page only accepts a submission with
+    // it, so nobody else on the network (or a web page open on the phone)
+    // can configure the DS.
+    char pin[8];
+    int pin_failures;
+    bool code_changed; // Set when the DS should redraw (new code, errors)
 
     setup_state state;
     char status[160];  // Shown on the phone page (and on the DS)
@@ -46,6 +56,7 @@ typedef struct {
     char password[128];
     char token[512];
     char code[16];
+    char pin_entered[16];
 
     // Login in progress
     ha_login login;
@@ -61,6 +72,9 @@ bool setup_server_start(setup_server *s, int port, const char *default_server);
 setup_event setup_server_poll(setup_server *s);
 
 void setup_server_stop(setup_server *s);
+
+// Generates a new pairing code
+void setup_server_new_pin(setup_server *s);
 
 // Signs in with the submitted values (blocking, a fraction of a second on a
 // LAN). On success it fills host, port and token/refresh_token in cfg and

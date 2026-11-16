@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, valid_entity_id
 from homeassistant.helpers.storage import Store
 
 from .const import (
@@ -21,14 +22,40 @@ from .const import (
 )
 
 
+_ENTITY_ID_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
+
+
 def _entity_id(value: Any) -> str:
-    """Accept anything that looks like an entity id (it may not exist yet)."""
-    if not isinstance(value, str) or value.count(".") != 1:
+    """A syntactically valid entity id (the entity may not exist yet).
+
+    Uses the rules of Home Assistant itself. The DS puts entity ids in request
+    paths and JSON, so nothing else may get through.
+    """
+    if not isinstance(value, str):
         raise vol.Invalid("invalid entity id")
-    domain, object_id = value.split(".")
-    if not domain or not object_id or len(value) > 63:
+    value = value.lower()
+    # fullmatch: valid_entity_id() alone accepts a trailing newline
+    if (
+        len(value) > 63
+        or not _ENTITY_ID_RE.fullmatch(value)
+        or not valid_entity_id(value)
+    ):
         raise vol.Invalid("invalid entity id")
-    return value.lower()
+    return value
+
+
+def _text(max_len: int, min_len: int = 0):
+    """A single line of text: control characters are removed."""
+
+    def validate(value: Any) -> str:
+        if not isinstance(value, str):
+            raise vol.Invalid("expected a string")
+        value = "".join(c for c in value if c.isprintable()).strip()
+        if not min_len <= len(value) <= max_len:
+            raise vol.Invalid(f"length must be between {min_len} and {max_len}")
+        return value
+
+    return validate
 
 
 TILE_SCHEMA = vol.Any(
@@ -36,9 +63,7 @@ TILE_SCHEMA = vol.Any(
     vol.Schema(
         {
             vol.Required("entity_id"): _entity_id,
-            vol.Optional("name", default=""): vol.All(
-                str, vol.Length(max=MAX_TILE_NAME)
-            ),
+            vol.Optional("name", default=""): _text(MAX_TILE_NAME),
             vol.Optional("action", default="default"): vol.In(TILE_ACTIONS),
         }
     ),
@@ -55,14 +80,14 @@ def _tiles(value: Any) -> list:
 
 PAGE_SCHEMA = vol.Schema(
     {
-        vol.Required("name"): vol.All(str, vol.Length(min=1, max=MAX_PAGE_NAME)),
+        vol.Required("name"): _text(MAX_PAGE_NAME, 1),
         vol.Required("tiles"): _tiles,
     }
 )
 
 LAYOUT_SCHEMA = vol.Schema(
     {
-        vol.Optional("title", default=""): vol.All(str, vol.Length(max=MAX_TITLE)),
+        vol.Optional("title", default=""): _text(MAX_TITLE),
         vol.Required("pages"): vol.All(
             [PAGE_SCHEMA], vol.Length(max=MAX_PAGES)
         ),

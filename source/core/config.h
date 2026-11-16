@@ -37,6 +37,11 @@ typedef struct {
     // Offline demo with fake entities (no WiFi or server needed)
     bool demo;
 
+    // Allow a server outside the local network. Off by default: the
+    // connection isn't encrypted, so credentials would cross the internet in
+    // clear text.
+    bool allow_public_server;
+
     // Use the layout of the DS Dashboard panel if the integration is
     // installed (default). 0 = ignore it.
     bool use_layout;

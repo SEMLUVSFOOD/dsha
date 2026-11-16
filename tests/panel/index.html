@@ -28,6 +28,8 @@ add("lock.front_door", "locked", { friendly_name: "Front door" });
 add("cover.garage", "closed", { friendly_name: "Garage door" });
 add("media_player.kitchen_speaker", "playing", { friendly_name: "Kitchen speaker" });
 add("update.core", "off", { friendly_name: "Core update" }); // Unsupported
+// Hostile names: must be shown as text, never run
+add("switch.xss", "on", { friendly_name: '<img src=x onerror="window.pwned=1">"><script>window.pwned=2<\/script>' });
 
 window.saved = [];
 let layout = { title: "", revision: 0,
@@ -35,7 +37,10 @@ let layout = { title: "", revision: 0,
 
 window.hass = {
   states,
-  areas: { kitchen: { area_id: "kitchen", name: "Kitchen" } },
+  areas: {
+    kitchen: { area_id: "kitchen", name: "Kitchen" },
+    evil: { area_id: 'x"><img src=x onerror="window.pwned=3">', name: '<svg onload="window.pwned=4">' },
+  },
   devices: { dev1: { id: "dev1", area_id: "kitchen" } },
   entities: {
     "light.kitchen": { entity_id: "light.kitchen", area_id: "kitchen" },

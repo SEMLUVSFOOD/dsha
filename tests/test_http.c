@@ -267,6 +267,15 @@ int main(int argc, char *argv[])
     CHECK(ha.error[0] != '\0');
     printf("  closed port error: %s\n", ha.error);
 
+    // Public addresses are refused: no credentials over the internet in
+    // clear text (and no packet is sent at all)
+    setup("8.8.8.8", 8123, "testtoken", "");
+    start = platform_millis();
+    CHECK(!ha_check(&ha));
+    CHECK(strstr(ha.error, "local network") != NULL);
+    CHECK(platform_millis() - start < 100);
+    printf("  public server: %s\n", ha.error);
+
     // Unknown host
     setup("does-not-exist.invalid", port, "testtoken", "");
     CHECK(!ha_check(&ha));

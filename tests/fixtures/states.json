@@ -76,7 +76,7 @@
     }
   },
   {
-    "entity_id": "light.k\u00fcche",
+    "entity_id": "light.kitchen_counter",
     "state": "off",
     "attributes": {
       "supported_color_modes": [

@@ -135,6 +135,80 @@ async def test_websocket(hass: HomeAssistant, hass_ws_client, hass_storage) -> N
     assert msg["result"]["revision"] == 1
 
 
+async def test_layout_validation(hass: HomeAssistant, hass_ws_client) -> None:
+    """Hostile values never reach the DS."""
+    await setup(hass)
+    ws = await hass_ws_client(hass)
+    bad_ids = ["light.a/../../api", "light.a b", "light.a\r\nX: y",
+               "light", "light.", ".a", "light.a.b", "LIGHT.A\n", 5]
+    for i, entity_id in enumerate(bad_ids):
+        layout = {"pages": [{"name": "x", "tiles": [{"entity_id": entity_id}]}]}
+        await ws.send_json({"id": 10 + i, "type": "dsha/layout/save",
+                            "layout": layout})
+        msg = await ws.receive_json()
+        assert not msg["success"], entity_id
+
+    # Control characters are removed from names
+    layout = {"title": "My\nDS\x00", "pages": [{"name": "A\r\nB",
+              "tiles": [{"entity_id": "Light.Kitchen", "name": "x\ty\n"}]}]}
+    await ws.send_json({"id": 50, "type": "dsha/layout/save", "layout": layout})
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    saved = msg["result"]
+    assert saved["title"] == "MyDS"
+    assert saved["pages"][0]["name"] == "AB"
+    assert saved["pages"][0]["tiles"][0] == {"entity_id": "light.kitchen",
+                                             "name": "xy", "action": "default"}
+
+    # Empty page name, unknown keys and too many pages are rejected
+    for i, layout in enumerate([
+        {"pages": [{"name": " \n", "tiles": []}]},
+        {"pages": [{"name": "x", "tiles": [], "evil": 1}]},
+        {"pages": [{"name": f"p{n}", "tiles": []} for n in range(17)]},
+        {"pages": [{"name": "x", "tiles": [{"entity_id": "light.a",
+                                            "action": "rm -rf"}]}]},
+    ]):
+        await ws.send_json({"id": 60 + i, "type": "dsha/layout/save",
+                            "layout": layout})
+        msg = await ws.receive_json()
+        assert not msg["success"], layout
+
+
+async def test_states_respect_permissions(
+    hass: HomeAssistant, hass_ws_client, hass_client
+) -> None:
+    """A user only gets the states they are allowed to read."""
+    from pytest_homeassistant_custom_component.common import MockUser
+
+    await setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "dsha/layout/save", "layout": LAYOUT})
+    assert (await ws.receive_json())["success"]
+
+    user = MockUser().add_to_hass(hass)  # No groups: not an admin
+    user.mock_policy({"entities": {"entity_ids": {"light.living_room": True}}})
+    refresh = await hass.auth.async_create_refresh_token(
+        user, "https://example.com/"
+    )
+    token = hass.auth.async_create_access_token(refresh)
+
+    client = await hass_client(token)
+    resp = await client.get("/api/dsha/states")
+    assert resp.status == HTTPStatus.OK
+    ids = [s["entity_id"] for s in await resp.json()]
+    assert ids == ["light.living_room"]
+
+    # The layout itself contains no secrets and stays readable
+    resp = await client.get("/api/dsha/layout")
+    assert resp.status == HTTPStatus.OK
+
+    # And a non-admin can't change it
+    ws2 = await hass_ws_client(hass, token)
+    await ws2.send_json({"id": 1, "type": "dsha/layout/save", "layout": LAYOUT})
+    msg = await ws2.receive_json()
+    assert not msg["success"]
+
+
 async def test_save_needs_admin(
     hass: HomeAssistant, hass_ws_client, hass_read_only_access_token
 ) -> None:

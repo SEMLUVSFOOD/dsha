@@ -13,7 +13,7 @@ const char demo_states_json[] =
     "tes\":{\"supported_color_modes\":[\"color_temp\",\"hs\"],\"brightness\":191,\"fr"
     "iendly_name\":\"Living room ceiling\"}},{\"entity_id\":\"light.hallway\",\"sta"
     "te\":\"off\",\"attributes\":{\"supported_color_modes\":[\"onoff\"],\"friendly_na"
-    "me\":\"Hallway\"}},{\"entity_id\":\"light.k\\u00fcche\",\"state\":\"off\",\"attribu"
+    "me\":\"Hallway\"}},{\"entity_id\":\"light.kitchen_counter\",\"state\":\"off\",\"attribu"
     "tes\":{\"supported_color_modes\":[\"brightness\"],\"brightness\":null,\"friend"
     "ly_name\":\"K\\u00fcche \\u00e9clairage \\u2728\"}},{\"entity_id\":\"switch.cof"
     "fee_machine\",\"state\":\"on\",\"attributes\":{\"friendly_name\":\"Coffee machin"

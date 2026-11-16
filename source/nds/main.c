@@ -23,6 +23,7 @@
 #include "ha.h"
 #include "platform.h"
 #include "setup_server.h"
+#include "validate.h"
 
 // Platform functions
 // ------------------
@@ -37,6 +38,31 @@ static void vblank_handler(void)
 void platform_yield(void)
 {
     cothread_yield();
+}
+
+// The DS has no hardware random generator: mix several things that can't be
+// guessed from the network (exact timing of the user's actions, the scanline
+// being drawn, touch screen noise, the clock).
+static uint32_t entropy = 0x9E3779B9;
+
+static void add_entropy(uint32_t v)
+{
+    entropy ^= v + 0x9E3779B9 + (entropy << 6) + (entropy >> 2);
+}
+
+uint32_t platform_random(void)
+{
+    add_entropy(REG_VCOUNT);
+    add_entropy(vblank_count);
+    add_entropy((uint32_t)time(NULL));
+    add_entropy(TIMER_DATA(0) | (TIMER_DATA(1) << 16));
+    // xorshift
+    uint32_t x = entropy;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    entropy = x;
+    return x;
 }
 
 uint32_t platform_millis(void)
@@ -109,10 +135,15 @@ static void read_input(app_input *in)
             in->held |= map[i].app;
     }
 
+    // Timing of key presses and touch noise feed the random generator
+    if (down)
+        add_entropy(down ^ REG_VCOUNT ^ (vblank_count << 8));
+
     if (held & KEY_TOUCH)
     {
         touchPosition touch;
         touchRead(&touch);
+        add_entropy(touch.rawx | ((uint32_t)touch.rawy << 16));
         in->touching = true;
         in->tx = touch.px;
         in->ty = touch.py;
@@ -460,8 +491,10 @@ static void wifi_setup(void)
                 for (int i = 0; i < count && n < PICKER_MAX_ITEMS; i++)
                 {
                     Wifi_AccessPoint ap;
+                    // Skip hidden networks and names with control characters
+                    // (they could be used to inject lines in config.ini)
                     if (Wifi_GetAPData(i, &ap) != WIFI_RETURN_OK
-                        || ap.ssid[0] == '\0')
+                        || ap.ssid[0] == '\0' || !valid_line(ap.ssid))
                         continue;
                     bool dup = false;
                     for (int j = 0; j < n; j++)
@@ -541,6 +574,7 @@ static void wifi_setup(void)
             if (!run_keyboard())
                 continue;
             snprintf(password, sizeof(password), "%s", app.kbd.text);
+            memset(app.kbd.text, 0, sizeof(app.kbd.text));
         }
 
         Wifi_SetIP(0, 0, 0, 0, 0);
@@ -721,8 +755,8 @@ static bool sign_in(const char *server)
     {
         picker_init(&app.picker, "Sign in to Home Assistant",
                     web ? "On your phone or computer (on the same WiFi), "
-                          "open the address above and sign in with your "
-                          "Home Assistant user.\n\n"
+                          "open the address above, type the code and sign "
+                          "in with your Home Assistant user.\n"
                           "Or tap \"Type on the DS\"."
                         : "Sign in with your Home Assistant user name and "
                           "password.");
@@ -730,6 +764,8 @@ static bool sign_in(const char *server)
         {
             snprintf(app.picker.big_text, sizeof(app.picker.big_text), "%s",
                      url);
+            snprintf(app.picker.big_text2, sizeof(app.picker.big_text2),
+                     "Code: %s", srv.pin);
             snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
                      "Waiting for you to sign in on your phone...");
         }
@@ -742,7 +778,18 @@ static bool sign_in(const char *server)
 
         while (!picker_finished(&app.picker))
         {
-            if (web && setup_server_poll(&srv) == SETUP_SUBMITTED)
+            setup_event ev = web ? setup_server_poll(&srv) : SETUP_NOTHING;
+            if (srv.code_changed)
+            {
+                // A wrong code was typed (or a new one was generated)
+                srv.code_changed = false;
+                snprintf(app.picker.big_text2, sizeof(app.picker.big_text2),
+                         "Code: %s", srv.pin);
+                snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
+                         "%s", srv.status);
+                app.dirty = true;
+            }
+            if (ev == SETUP_SUBMITTED)
             {
                 snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
                          "Signing in...");

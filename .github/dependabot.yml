@@ -1,0 +1,14 @@
+# Keeps the pinned GitHub Actions up to date (with their commit hashes)
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /tests/panel
+    schedule:
+      interval: monthly

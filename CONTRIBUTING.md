@@ -59,6 +59,10 @@ entity domain.
 - If you change the UI, run `make screenshots` and look at the result in
   `docs/screenshots/` (commit the updated images if the change is visible).
 - Make sure `make docker` builds without warnings.
+- Anything that comes from the network (server responses, WiFi names, the
+  setup page) must be validated before use: see `source/core/validate.c` and
+  [SECURITY.md](SECURITY.md). `make test` also runs the fuzzer; for parser
+  changes, run it longer: `tests/build/fuzz 5000000`.
 - Update the docs and `CHANGELOG.md` if users will notice the change.
 
 By contributing you agree that your contributions are licensed under the MIT

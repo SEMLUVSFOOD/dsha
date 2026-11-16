@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "validate.h"
 
 void config_defaults(ha_config *cfg)
 {
@@ -86,11 +87,11 @@ static void add_entities(ha_config *cfg, char *value)
          tok = strtok_r(NULL, ",", &save))
     {
         char *id = trim(tok);
-        if (*id == '\0' || strchr(id, '.') == NULL)
+        lowercase(id);
+        if (!valid_entity_id(id))
             continue;
         if (cfg->num_entities >= CFG_MAX_ENTITIES)
             return;
-        lowercase(id);
         copy_str(cfg->entities[cfg->num_entities], CFG_ENTITY_ID_LEN, id);
         cfg->num_entities++;
     }
@@ -161,6 +162,10 @@ bool config_parse(ha_config *cfg, const char *text, char *err, size_t errlen)
             cfg->use_layout = !(strcmp(value, "0") == 0
                                 || strcmp(value, "false") == 0
                                 || strcmp(value, "no") == 0);
+        else if (strcmp(key, "allow_public_server") == 0)
+            cfg->allow_public_server = strcmp(value, "1") == 0
+                                       || strcmp(value, "true") == 0
+                                       || strcmp(value, "yes") == 0;
         else if (strcmp(key, "demo") == 0)
             cfg->demo = atoi(value) != 0 || strcmp(value, "true") == 0
                         || strcmp(value, "yes") == 0;
@@ -180,6 +185,18 @@ bool config_parse(ha_config *cfg, const char *text, char *err, size_t errlen)
 
     if (cfg->demo)
         return true;
+
+    if (cfg->host[0] != '\0' && !valid_host(cfg->host))
+    {
+        snprintf(err, errlen, "Invalid 'host' in config file");
+        return false;
+    }
+    if ((cfg->token[0] && !valid_token(cfg->token))
+        || (cfg->refresh_token[0] && !valid_token(cfg->refresh_token)))
+    {
+        snprintf(err, errlen, "Invalid token in config file");
+        return false;
+    }
 
     if (cfg->host[0] == '\0')
     {
@@ -213,9 +230,22 @@ bool config_load_file(ha_config *cfg, const char *path, char *err,
     return config_parse(cfg, buf, err, errlen);
 }
 
-size_t config_write(const ha_config *cfg, char *out, size_t out_len)
+size_t config_write(const ha_config *in, char *out, size_t out_len)
 {
     size_t len = 0;
+
+    // Never write control characters: a value with a newline (for example a
+    // WiFi network name chosen by a neighbour) could add config lines.
+    static ha_config clean;
+    clean = *in;
+    const ha_config *cfg = &clean;
+    sanitize_line(clean.host);
+    sanitize_line(clean.token);
+    sanitize_line(clean.refresh_token);
+    sanitize_line(clean.wifi_ssid);
+    sanitize_line(clean.wifi_password);
+    sanitize_line(clean.title);
+    sanitize_line(clean.domains);
 
 #define PUT(...)                                                        \
     do {                                                                \
@@ -249,6 +279,8 @@ size_t config_write(const ha_config *cfg, char *out, size_t out_len)
         PUT("domains = %s\n", cfg->domains);
     if (!cfg->use_layout)
         PUT("use_layout = 0\n");
+    if (cfg->allow_public_server)
+        PUT("allow_public_server = 1\n");
     if (cfg->num_entities > 0)
         PUT("\n");
     for (int i = 0; i < cfg->num_entities; i++)

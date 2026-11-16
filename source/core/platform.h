@@ -17,4 +17,9 @@ void platform_yield(void);
 // Monotonic milliseconds counter. It may wrap around.
 uint32_t platform_millis(void);
 
+// Random number for the pairing code of the setup page. It doesn't need to be
+// cryptographically strong (the code is short-lived and attempts are
+// limited), but it must not be predictable from outside.
+uint32_t platform_random(void);
+
 #endif // DSHA_PLATFORM_H

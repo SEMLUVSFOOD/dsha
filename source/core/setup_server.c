@@ -19,14 +19,33 @@
 #include "ha.h"
 #include "platform.h"
 #include "setup_server.h"
+#include "validate.h"
 
 #define REQUEST_MAX 4096
-#define REQUEST_TIMEOUT_MS 3000
+#define REQUEST_TIMEOUT_MS 1500
+
+void setup_server_new_pin(setup_server *s)
+{
+    snprintf(s->pin, sizeof(s->pin), "%06u",
+             (unsigned)(platform_random() % 1000000u));
+    s->pin_failures = 0;
+}
+
+// Comparison that takes the same time whatever the input
+static bool pin_matches(const char *a, const char *b)
+{
+    size_t la = strlen(a), lb = strlen(b);
+    unsigned diff = (unsigned)(la ^ lb);
+    for (size_t i = 0; i < lb; i++)
+        diff |= (unsigned)(i < la ? a[i] : 0) ^ (unsigned)b[i];
+    return diff == 0 && lb > 0;
+}
 
 bool setup_server_start(setup_server *s, int port, const char *default_server)
 {
     memset(s, 0, sizeof(*s));
     s->listen_fd = -1;
+    setup_server_new_pin(s);
     s->port = port;
     snprintf(s->default_server, sizeof(s->default_server), "%s",
              default_server ? default_server : "");
@@ -204,12 +223,18 @@ static const char page_head[] =
 
 static void respond(int fd, int code, const char *body)
 {
-    char header[256];
+    char header[640];
     int n = snprintf(header, sizeof(header),
                      "HTTP/1.1 %d %s\r\n"
                      "Content-Type: text/html; charset=utf-8\r\n"
                      "Content-Length: %u\r\n"
                      "Cache-Control: no-store\r\n"
+                     "X-Content-Type-Options: nosniff\r\n"
+                     "X-Frame-Options: DENY\r\n"
+                     "Referrer-Policy: no-referrer\r\n"
+                     "Content-Security-Policy: default-src 'none'; "
+                     "style-src 'unsafe-inline'; form-action 'self'; "
+                     "frame-ancestors 'none'\r\n"
                      "Connection: close\r\n\r\n",
                      code, code == 200 ? "OK" : code == 303 ? "See Other"
                                                             : "Not Found",
@@ -243,12 +268,15 @@ static void page_form(setup_server *s, int fd)
              "<p>Sign in to Home Assistant for your Nintendo DS.</p>"
              "%s%s%s"
              "<form method=\"post\" action=\"/\">"
+             "<label>Code shown on your DS</label>"
+             "<input name=\"pin\" inputmode=\"numeric\" maxlength=\"6\" "
+             "autocomplete=\"off\" required placeholder=\"6 digits\">"
              "<label>Home Assistant address</label>"
              "<input name=\"server\" value=\"%s\" "
              "placeholder=\"192.168.1.10:8123\" autocapitalize=\"off\">"
              "<label>User name</label>"
              "<input name=\"username\" autocapitalize=\"off\" "
-             "autocomplete=\"username\" autofocus>"
+             "autocomplete=\"username\">"
              "<label>Password</label>"
              "<input name=\"password\" type=\"password\" "
              "autocomplete=\"current-password\">"
@@ -358,8 +386,8 @@ static int read_request(int fd)
                     const char *cl = find_nocase(request,
                                                  "\r\nContent-Length:");
                     body_len = (cl && cl < e) ? atol(cl + 17) : 0;
-                    if (body_len < 0)
-                        body_len = 0;
+                    if (body_len < 0 || body_len > REQUEST_MAX)
+                        body_len = REQUEST_MAX;
                 }
             }
             if (header_end && len >= header_end + (size_t)body_len)
@@ -405,6 +433,17 @@ setup_event setup_server_poll(setup_server *s)
         bool get = strncmp(request, "GET ", 4) == 0;
         const char *path = request + (post ? 5 : 4);
 
+        // Sign in form: only valid with the pairing code shown on the DS
+        bool sign_in_post = post && strncmp(path, "/ ", 2) == 0
+                            && s->state == SETUP_STATE_WAITING;
+        bool pin_ok = false;
+        if (sign_in_post)
+        {
+            form_value(body, "pin", s->pin_entered, sizeof(s->pin_entered));
+            pin_ok = pin_matches(s->pin_entered, s->pin);
+            memset(s->pin_entered, 0, sizeof(s->pin_entered));
+        }
+
         if (get && (strncmp(path, "/ ", 2) == 0 || strncmp(path, "/?", 2) == 0))
         {
             if (s->state == SETUP_STATE_WAITING)
@@ -426,8 +465,26 @@ setup_event setup_server_poll(setup_server *s)
             redirect(fd, "/status");
             ev = SETUP_SUBMITTED;
         }
-        else if (post && strncmp(path, "/ ", 2) == 0
-                 && s->state == SETUP_STATE_WAITING)
+        else if (sign_in_post && !pin_ok)
+        {
+            // Wrong pairing code: nothing else in the form is used
+            if (++s->pin_failures >= SETUP_MAX_CODE_ATTEMPTS)
+            {
+                setup_server_new_pin(s);
+                snprintf(s->status, sizeof(s->status),
+                         "Too many wrong codes. Use the new code shown on "
+                         "the DS.");
+            }
+            else
+            {
+                snprintf(s->status, sizeof(s->status),
+                         "Wrong code. Type the 6 digits shown on the DS.");
+            }
+            s->status_error = true;
+            s->code_changed = true;
+            redirect(fd, "/");
+        }
+        else if (sign_in_post)
         {
             form_value(body, "server", s->server, sizeof(s->server));
             form_value(body, "username", s->username, sizeof(s->username));
@@ -448,6 +505,9 @@ setup_event setup_server_poll(setup_server *s)
             redirect(fd, "/");
         }
     }
+
+    // The request may contain a password
+    memset(request, 0, sizeof(request));
 
     shutdown(fd, SHUT_RDWR);
     close(fd);
@@ -514,8 +574,20 @@ login_result setup_sign_in(setup_server *s, ha_config *cfg,
                    NULL);
         return LOGIN_INVALID;
     }
+    if (!valid_host(s->login_host))
+    {
+        set_status(s, true, "That address isn't valid%s", NULL);
+        return LOGIN_INVALID;
+    }
+    if (token != NULL && token[0] != '\0' && !valid_token(token))
+    {
+        set_status(s, true, "That token isn't valid (it has spaces or "
+                            "line breaks?)%s", NULL);
+        return LOGIN_INVALID;
+    }
 
     http_client_init(&c, s->login_host, s->login_port);
+    c.allow_public = cfg->allow_public_server;
     c.timeout_ms = 5000;
 
     if (!auth_probe(&c))
@@ -539,6 +611,7 @@ login_result setup_sign_in(setup_server *s, ha_config *cfg,
         tmp.port = s->login_port;
         snprintf(tmp.token, sizeof(tmp.token), "%s", token);
         tmp.num_entities = 1; // Don't care about entities here
+        tmp.allow_public_server = cfg->allow_public_server;
         ha_init(&ha, &tmp);
         bool ok = ha_check(&ha);
         http_client_close(&ha.http);
@@ -589,6 +662,7 @@ login_result setup_sign_in_mfa(setup_server *s, ha_config *cfg,
 {
     static http_client c;
     http_client_init(&c, s->login_host, s->login_port);
+    c.allow_public = cfg->allow_public_server;
     c.timeout_ms = 5000;
 
     login_result r = auth_login_mfa(&c, &s->login, code);
@@ -624,7 +698,9 @@ bool setup_process(setup_server *s, ha_config *cfg)
         r = setup_sign_in(s, cfg, s->server, s->username, s->password,
                           s->token);
 
-    // Don't keep the password in memory longer than needed
+    // Don't keep secrets in memory longer than needed
     memset(s->password, 0, sizeof(s->password));
+    memset(s->token, 0, sizeof(s->token));
+    memset(s->code, 0, sizeof(s->code));
     return r == LOGIN_OK;
 }

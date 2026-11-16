@@ -215,12 +215,16 @@ int main(int argc, char *argv[])
     app_draw(&app, top, bottom);
     save("12_setup_found");
 
-    picker_init(&app.picker, "Sign in",
-                "On your phone or computer (same WiFi), open the address "
-                "above and sign in with your Home Assistant account.\n\n"
-                "Or tap \"Type on the DS\".");
+    picker_init(&app.picker, "Sign in to Home Assistant",
+                "On your phone or computer (on the same WiFi), open the "
+                "address above, type the code and sign in with your Home "
+                "Assistant user.\nOr tap \"Type on the DS\".");
     snprintf(app.picker.big_text, sizeof(app.picker.big_text),
              "http://192.168.1.57");
+    snprintf(app.picker.big_text2, sizeof(app.picker.big_text2),
+             "Code: 482915");
+    snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
+             "Waiting for you to sign in on your phone...");
     picker_set_actions(&app.picker, "Type on the DS", "Back");
     app_show_picker(&app);
     app_draw(&app, top, bottom);

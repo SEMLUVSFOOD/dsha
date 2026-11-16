@@ -19,8 +19,13 @@
 
 #include "http.h"
 #include "platform.h"
+#include "validate.h"
 
 #define HTTP_HEADER_MAX 4096
+
+// Largest body/chunk accepted (the DS has 4 MB of RAM, but bodies are
+// streamed, so this is only a sanity limit)
+#define HTTP_MAX_CHUNK 0x7FFFFFFL
 
 void http_client_init(http_client *c, const char *host, int port)
 {
@@ -74,6 +79,15 @@ static bool resolve(http_client *c, http_result *res)
         struct sockaddr_in *found = (struct sockaddr_in *)result->ai_addr;
         sin.sin_addr = found->sin_addr;
         freeaddrinfo(result);
+    }
+
+    if (!c->allow_public && !is_private_ipv4(ntohl(sin.sin_addr.s_addr)))
+    {
+        // The connection isn't encrypted: never send credentials over the
+        // internet in clear text.
+        set_error(res, "%s isn't on your local network. DSHA only talks to "
+                       "local servers (no HTTPS).", c->host);
+        return false;
     }
 
     memcpy(c->addr, &sin, sizeof(sin));
@@ -257,7 +271,13 @@ static bool parse_headers(resp_parser *p)
                 value++;
 
             if (strcasecmp(line, "Content-Length") == 0)
-                p->content_length = atol(value);
+            {
+                char *end;
+                long v = strtol(value, &end, 10);
+                if (end == value || v < 0 || v > HTTP_MAX_CHUNK)
+                    return false; // Invalid or absurd length
+                p->content_length = v;
+            }
             else if (strcasecmp(line, "Transfer-Encoding") == 0
                      && strstr(value, "chunked") != NULL)
                 p->chunked = true;
@@ -330,6 +350,9 @@ static bool parse_body(resp_parser *p, const char *data, size_t len)
                 int h = hexdigit(c);
                 if (h >= 0)
                 {
+                    // Reject absurd sizes instead of overflowing
+                    if (p->chunk_size > (HTTP_MAX_CHUNK >> 4))
+                        return false;
                     p->chunk_size = p->chunk_size * 16 + h;
                 }
                 else if (c == ';' || c == ' ' || c == '\t' || c == '\r')
@@ -444,6 +467,30 @@ static bool parse_data(resp_parser *p, const char *data, size_t len)
 
     return parse_body(p, data, len);
 }
+
+#ifdef DSHA_TESTING
+// Test hook: runs the response parser over a buffer (used by the fuzzer)
+bool http_parse_response_for_test(const char *data, size_t len,
+                                  size_t chunk, http_data_cb cb, void *user,
+                                  int *status, bool *complete)
+{
+    static resp_parser p;
+    memset(&p, 0, sizeof(p));
+    p.cb = cb;
+    p.user = user;
+    p.content_length = -1;
+    p.error_body = true;
+    bool ok = true;
+    for (size_t i = 0; i < len && ok; i += chunk)
+    {
+        size_t n = len - i < chunk ? len - i : chunk;
+        ok = parse_data(&p, data + i, n);
+    }
+    *status = p.status;
+    *complete = p.headers_done && p.body_state == BODY_DONE;
+    return ok;
+}
+#endif
 
 // Result of one attempt
 enum {

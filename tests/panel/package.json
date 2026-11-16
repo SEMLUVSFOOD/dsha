@@ -1,0 +1,12 @@
+{
+  "name": "dsha-panel-tests",
+  "private": true,
+  "description": "Browser test of the DS Dashboard panel",
+  "license": "MIT",
+  "scripts": {
+    "test": "node test_panel.js"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

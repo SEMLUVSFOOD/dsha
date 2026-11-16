@@ -21,6 +21,9 @@ typedef struct {
     int port;
     int timeout_ms; // Max time without receiving any data
 
+    // Refuse servers outside the local network (see validate.h)
+    bool allow_public;
+
     int fd;              // Kept open between requests (keep-alive)
     bool addr_valid;     // Cached DNS result
     uint8_t addr[16];    // struct sockaddr_in storage

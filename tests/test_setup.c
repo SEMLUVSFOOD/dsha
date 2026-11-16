@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "platform.h"
 #include "setup_server.h"
@@ -26,13 +27,21 @@ int main(int argc, char *argv[])
         printf("Can't listen\n");
         return 1;
     }
-    printf("listening\n");
+    printf("listening %s\n", s.pin);
     fflush(stdout);
 
     uint32_t start = platform_millis();
     uint32_t done_at = 0;
-    while (platform_millis() - start < 30000)
+    while (platform_millis() - start < 600000)
     {
+        static char last_pin[8];
+        if (strcmp(last_pin, s.pin) != 0)
+        {
+            // The DS shows the new code; the test reads it from here
+            snprintf(last_pin, sizeof(last_pin), "%s", s.pin);
+            printf("pin %s\n", s.pin);
+            fflush(stdout);
+        }
         if (setup_server_poll(&s) == SETUP_SUBMITTED)
         {
             setup_process(&s, &cfg);

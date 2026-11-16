@@ -70,6 +70,7 @@ typedef struct {
     char title[48];
     char hint[240];
     char big_text[64];      // Large text on the top screen (an URL...)
+    char big_text2[32];     // Second large line (the pairing code)
     char empty_text[64];    // Shown on the bottom screen if there are no items
     int progress;           // 0-100, or -1 to hide the progress bar
 

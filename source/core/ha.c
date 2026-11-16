@@ -11,6 +11,7 @@
 #include "demo_data.h"
 #include "ha.h"
 #include "json_stream.h"
+#include "validate.h"
 
 struct ha_state_parser {
     ha_client *ha;
@@ -36,6 +37,7 @@ void ha_init(ha_client *ha, const ha_config *cfg)
 {
     memset(ha, 0, sizeof(*ha));
     http_client_init(&ha->http, cfg->host, cfg->port);
+    ha->http.allow_public = cfg->allow_public_server;
     snprintf(ha->headers, sizeof(ha->headers),
              "Authorization: Bearer %s\r\n", cfg->token);
     if (cfg->token[0] == '\0')
@@ -127,7 +129,7 @@ static void commit_entity(ha_state_parser *sp)
     ha_client *ha = sp->ha;
     ha_entity *cur = &sp->cur;
 
-    if (cur->id[0] == '\0')
+    if (!valid_entity_id(cur->id))
         return;
 
     sp->entities_seen++;
@@ -521,7 +523,8 @@ static void layout_reset(ha_client *ha)
 static void layout_add_tile(layout_parser *p)
 {
     ha_client *ha = p->ha;
-    if (ha->num_pages == 0 || p->slot >= LAYOUT_SLOTS || p->tile_id[0] == '\0')
+    if (ha->num_pages == 0 || p->slot >= LAYOUT_SLOTS
+        || !valid_entity_id(p->tile_id))
         return;
 
     ha_entity *e = find_entity(ha, p->tile_id);

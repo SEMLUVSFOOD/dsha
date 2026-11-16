@@ -7,6 +7,7 @@
 
 #include "auth.h"
 #include "json_get.h"
+#include "validate.h"
 
 // Collects a whole (small) response body in memory
 typedef struct {
@@ -37,6 +38,14 @@ static bool request(http_client *c, const char *method, const char *path,
     response[0] = '\0';
     return http_request_ex(c, method, path, NULL, body, content_type, true,
                            collect_cb, &b, res);
+}
+
+// memset() that the compiler can't remove
+static void secure_wipe(void *p, size_t len)
+{
+    volatile unsigned char *v = p;
+    while (len--)
+        *v++ = 0;
 }
 
 // Escapes a string to be put inside a JSON string literal
@@ -118,7 +127,8 @@ static login_result get_tokens(http_client *c, ha_login *l, const char *code)
         { "access_token", l->access_token, sizeof(l->access_token), false },
         { "refresh_token", l->refresh_token, sizeof(l->refresh_token), false },
     };
-    if (!json_get(response, f, 2) || !f[0].found || !f[1].found)
+    if (!json_get(response, f, 2) || !f[0].found || !f[1].found
+        || !valid_token(l->access_token) || !valid_token(l->refresh_token))
     {
         set_error(l, "Invalid token response", NULL);
         return LOGIN_ERROR;
@@ -256,7 +266,8 @@ login_result auth_login(http_client *c, ha_login *l, const char *username,
 
     l->flow_id[0] = '\0';
     login_result r = flow_response(c, l, &res);
-    if (l->flow_id[0] == '\0')
+    if (l->flow_id[0] == '\0' || !valid_token(l->flow_id)
+        || strchr(l->flow_id, '/') || strchr(l->flow_id, '?'))
         return r == LOGIN_OK ? LOGIN_ERROR : r;
 
     // 2. Send the credentials
@@ -269,7 +280,13 @@ login_result auth_login(http_client *c, ha_login *l, const char *username,
 
     char path[128];
     snprintf(path, sizeof(path), "/auth/login_flow/%s", l->flow_id);
-    if (!request(c, "POST", path, body, "application/json", &res))
+    bool sent = request(c, "POST", path, body, "application/json", &res);
+
+    // Wipe the copies of the password
+    secure_wipe(body, sizeof(body));
+    secure_wipe(pass_esc, sizeof(pass_esc));
+
+    if (!sent)
     {
         set_error(l, "", &res);
         return LOGIN_ERROR;
@@ -330,7 +347,7 @@ bool auth_refresh(http_client *c, const char *refresh_token,
     }
 
     json_field f[] = { { "access_token", access_token, access_len, false } };
-    if (!json_get(response, f, 1) || !f[0].found)
+    if (!json_get(response, f, 1) || !f[0].found || !valid_token(access_token))
     {
         snprintf(error, error_len, "Invalid token response");
         return false;

@@ -63,7 +63,7 @@ const server = http.createServer((req, res) => {
     await page.mouse.up();
   }
 
-  check((await panel.locator(".entity").count()) === 12,
+  check((await panel.locator(".entity").count()) === 13,
         "unsupported domains aren't listed");
   check(await panel.locator('[data-action="save"]').isDisabled(),
         "nothing to save at start");
@@ -174,6 +174,17 @@ const server = http.createServer((req, res) => {
     await slot(0).click();
     await page.screenshot({ path: process.argv[2] });
   }
+
+  // XSS: hostile names are text, in the list, in a tile and in the editor
+  await drag(entity("switch.xss"), slot(6));
+  await slot(6).click();
+  await page.waitForTimeout(200);
+  check(await page.evaluate(() => window.pwned === undefined),
+        "hostile entity and area names are not executed");
+  check((await slot(6).locator(".tile-name").textContent()).includes("<img"),
+        "hostile name shown as plain text");
+  check(await page.evaluate(() => !window.panel.shadowRoot.querySelector("img, script, svg")),
+        "no injected elements in the panel");
 
   check(errors.length === 0, `no errors in the console ${errors.join(" | ")}`);
 

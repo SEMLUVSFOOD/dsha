@@ -31,6 +31,9 @@ or the buttons.
   *DS Dashboard* page to the sidebar where you drag and drop entities,
   automations and scenes into the DS's pages, exactly how you want them.
 - **Offline demo mode** to try it without a server.
+- **Security first**: local network only, pairing code for the setup page,
+  password never stored, hardened and fuzzed parsers. See
+  [SECURITY.md](SECURITY.md).
 - **Open source** (MIT), with desktop unit tests and a fake Home Assistant
   server for development.
 
@@ -75,7 +78,7 @@ Assistant user name and password; no token or config file needed.
 |---|---|
 | <img src="docs/screenshots/09_setup_welcome.png" width="200"> | **WiFi.** DSHA first tries the WiFi settings saved in the console. If there are none, it lists the networks around you: tap yours and type the password on the touch keyboard. |
 | <img src="docs/screenshots/12_setup_found.png" width="200"> | **Find Home Assistant.** DSHA searches your network and lists the Home Assistant servers it finds. Tap yours. (You can also type the IP address.) |
-| <img src="docs/screenshots/13_setup_signin.png" width="200"> | **Sign in.** The DS shows an address like `http://192.168.1.57`. Open it on your **phone or computer** and sign in with your Home Assistant user name and password, like on the Home Assistant website. Prefer the DS? Tap **Type on the DS** and use the keyboard. Two-factor codes are supported. |
+| <img src="docs/screenshots/13_setup_signin.png" width="200"> | **Sign in.** The DS shows an address like `http://192.168.1.57` and a 6-digit code. Open the address on your **phone or computer**, type the code and sign in with your Home Assistant user name and password, like on the Home Assistant website. Prefer the DS? Tap **Type on the DS** and use the keyboard. Two-factor codes are supported. |
 
 <p align="center">
   <img src="docs/screenshots/phone_signin.png" width="240" alt="Sign in page on a phone">
@@ -155,9 +158,10 @@ Entities from other domains are shown (read only) when you list them with
 
 - **No HTTPS.** TLS on a 67 MHz CPU is slow and memory hungry, so DSHA talks
   plain HTTP. Use the local address of Home Assistant, not your Nabu Casa or
-  other remote `https://` URL. Only use DSHA on a network you trust: the
-  sign in and the session token travel unencrypted (as with any `http://`
-  access to Home Assistant).
+  other remote `https://` URL (DSHA refuses non-local addresses). Only use
+  DSHA on a network you trust: the sign in and the session token travel
+  unencrypted (as with any `http://` access to Home Assistant). Details in
+  [SECURITY.md](SECURITY.md).
 - **WPA2 only on DSi.** The original DS WiFi hardware only supports open and
   WEP networks. If your router is WPA2-only, use a DSi, or create an open/WEP
   guest network (ideally isolated, with only Home Assistant reachable).

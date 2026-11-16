@@ -531,6 +531,12 @@ void picker_draw(picker *p, color_t *top, color_t *bottom)
                           p->big_text, C_TEXT, scale);
         y += 32;
     }
+    if (p->big_text2[0])
+    {
+        gfx_rect(top, 4, y - 2, GFX_W - 8, 26, C_PANEL);
+        gfx_text_centered(top, 4, y + 3, GFX_W - 8, p->big_text2, C_ACCENT, 2);
+        y += 32;
+    }
 
     if (p->progress >= 0)
     {

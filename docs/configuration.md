@@ -43,6 +43,7 @@ file. The wizard saves to the file that was loaded, or to `sd:/dsha/config.ini`
 | `refresh_seconds` | `15` | How often the entities on screen are refreshed. `0` disables auto refresh (press Y to refresh). |
 | `entity` | *(none)* | An entity to show. Repeat the line for more entities, or list several separated by commas. They are shown in this order. Up to 128. |
 | `domains` | *(all)* | Only used when there are no `entity` lines: comma separated list of the domains to show, like `light, switch, climate`. |
+| `allow_public_server` | `0` | DSHA refuses servers that aren't on a local/private network, because the connection isn't encrypted. `1` allows them; **don't**, unless the "public" address is really inside a network you trust (some VPNs). |
 | `use_layout` | `1` | Use the layout of the DS Dashboard panel when the [Home Assistant integration](integration.md) is installed. `0` ignores it. |
 | `demo` | `0` | `1` starts an offline demo with fake entities. No WiFi or server needed. |
 
@@ -100,7 +101,12 @@ one.
   Home Assistant profile. Consider a dedicated non-admin user for the DS.
 - Your password is only used to sign in and is never written to the SD card.
 - During setup, the DS serves the sign in page on port 80 of your local
-  network. It stops as soon as you are signed in.
+  network. It only accepts the 6-digit code shown on the DS, and it stops as
+  soon as you are signed in.
+- DSHA only talks to servers on your local network (see
+  `allow_public_server`). Don't expose Home Assistant's plain HTTP port to the
+  internet for the DS.
+- See [SECURITY.md](../SECURITY.md) for the full threat model.
 - The connection is plain HTTP, so anyone able to sniff your WiFi network can
   see the token. WEP is easy to break: if you use a WEP or open network for
   the DS, isolate it from the rest of your network.

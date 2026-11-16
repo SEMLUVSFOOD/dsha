@@ -16,6 +16,7 @@ source/
 │   ├── http.c          HTTP/1.1 client (keep-alive, chunked) over BSD sockets
 │   ├── json_stream.c   Streaming (SAX) JSON parser
 │   ├── json_get.c      Picks values by path ("errors.base") from small JSON
+│   ├── validate.c      Validation of untrusted values (ids, hosts, tokens)
 │   ├── config.c        config.ini parser
 │   ├── demo_data.c     Fake states for the offline demo
 │   └── platform.h      What a platform must provide (yield, milliseconds)
@@ -27,6 +28,7 @@ custom_components/dsha/ Home Assistant integration (Python)
 ├── config_flow.py      "Add integration" dialog
 └── frontend/dsha-panel.js  The DS Dashboard panel (web component, no build)
 tests/                  Desktop tests, fake Home Assistant, screenshot renderer
+tests/fuzz.c            Fuzzer of all the parsers (ASan + UBSan)
 tests/panel/            Browser test of the panel (Playwright)
 tests_ha/               Integration tests inside a real Home Assistant core
 ```

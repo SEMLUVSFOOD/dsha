@@ -14,6 +14,26 @@
 - `use_layout = 0` in `config.ini` ignores the layout.
 - The demo shows a layout with three pages.
 
+### Security
+
+- Fixed an out of bounds read in the HTTP client with huge chunk sizes
+  (found by the new fuzzer). Content-Length is validated too.
+- The setup page needs the 6-digit pairing code shown on the DS (protects
+  against other devices on the network and CSRF), with a new code after 5
+  wrong attempts, and sends security headers.
+- DSHA refuses servers outside the local network (no credentials over the
+  internet in clear text); `allow_public_server = 1` to override.
+- Strict validation of entity ids, host names and tokens from the network;
+  control characters (from WiFi names, for example) are never written to
+  `config.ini`.
+- Passwords are wiped from memory after signing in.
+- Integration: strict entity id validation (a trailing newline was accepted
+  by Home Assistant's own check), control characters stripped from names,
+  states filtered by user permissions (tested).
+- New fuzz tests (parsers and hostile clients of the setup page), XSS test of
+  the panel, CodeQL, pinned GitHub Actions, Dependabot, zizmor-clean
+  workflows.
+
 ## 1.1.0 — 2026-11-16
 
 Setup is now as easy as we could make it: no config file or token needed.
