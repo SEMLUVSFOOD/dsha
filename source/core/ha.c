@@ -1,0 +1,634 @@
+// SPDX-License-Identifier: MIT
+//
+// Copyright (c) 2026 DSHA contributors
+
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+
+#include "demo_data.h"
+#include "ha.h"
+#include "json_stream.h"
+
+struct ha_state_parser {
+    ha_client *ha;
+    const ha_config *cfg;
+    bool add_new;
+
+    json_parser json;
+    int base;          // Depth of the state objects (0 or 1), -1 = unknown
+    bool in_entity;
+    bool in_attrs;
+    bool in_color_modes;
+    char key1[32];     // Key inside the state object
+    char key2[32];     // Key inside "attributes"
+
+    ha_entity cur;
+    bool got_name;
+    int entities_seen;
+};
+
+static ha_state_parser state_parser;
+
+void ha_init(ha_client *ha, const ha_config *cfg)
+{
+    memset(ha, 0, sizeof(*ha));
+    http_client_init(&ha->http, cfg->host, cfg->port);
+    snprintf(ha->headers, sizeof(ha->headers),
+             "Authorization: Bearer %s\r\n", cfg->token);
+
+    ha->demo = cfg->demo;
+    ha->auto_mode = cfg->num_entities == 0;
+    if (!ha->auto_mode)
+    {
+        for (int i = 0; i < cfg->num_entities && i < ENTITY_MAX; i++)
+            entity_init(&ha->entities[i], cfg->entities[i]);
+        ha->count = cfg->num_entities < ENTITY_MAX ? cfg->num_entities
+                                                   : ENTITY_MAX;
+    }
+}
+
+static ha_entity *find_entity(ha_client *ha, const char *id)
+{
+    for (int i = 0; i < ha->count; i++)
+    {
+        if (strcmp(ha->entities[i].id, id) == 0)
+            return &ha->entities[i];
+    }
+    return NULL;
+}
+
+static float to_float(json_event ev, const char *value)
+{
+    if (ev == JSON_EV_NUMBER)
+        return (float)atof(value);
+    if (ev == JSON_EV_STRING && value[0] != '\0'
+        && (isdigit((unsigned char)value[0]) || value[0] == '-'))
+        return (float)atof(value);
+    return ATTR_NONE;
+}
+
+static void set_str(char *dst, size_t size, const char *src)
+{
+    snprintf(dst, size, "%s", src);
+}
+
+static void handle_attribute(ha_state_parser *sp, json_event ev,
+                             const char *value)
+{
+    ha_entity *e = &sp->cur;
+    const char *k = sp->key2;
+
+    if (strcmp(k, "friendly_name") == 0 && ev == JSON_EV_STRING)
+    {
+        set_str(e->name, sizeof(e->name), value);
+        sp->got_name = true;
+    }
+    else if (strcmp(k, "unit_of_measurement") == 0 && ev == JSON_EV_STRING)
+        set_str(e->unit, sizeof(e->unit), value);
+    else if (strcmp(k, "temperature_unit") == 0 && ev == JSON_EV_STRING)
+        set_str(e->unit, sizeof(e->unit), value); // weather
+    else if (strcmp(k, "device_class") == 0 && ev == JSON_EV_STRING)
+        set_str(e->device_class, sizeof(e->device_class), value);
+    else if (strcmp(k, "brightness") == 0)
+        e->brightness = to_float(ev, value);
+    else if (strcmp(k, "current_temperature") == 0)
+        e->current_temperature = to_float(ev, value);
+    else if (strcmp(k, "temperature") == 0)
+        e->target_temperature = to_float(ev, value);
+    else if (strcmp(k, "target_temp_step") == 0)
+        e->target_temp_step = to_float(ev, value);
+    else if (strcmp(k, "min") == 0 || strcmp(k, "min_temp") == 0)
+        e->min_value = to_float(ev, value);
+    else if (strcmp(k, "max") == 0 || strcmp(k, "max_temp") == 0)
+        e->max_value = to_float(ev, value);
+    else if (strcmp(k, "step") == 0)
+        e->step = to_float(ev, value);
+    else if (strcmp(k, "volume_level") == 0)
+        e->volume = to_float(ev, value);
+    else if (strcmp(k, "current_position") == 0)
+        e->position = to_float(ev, value);
+    else if ((strcmp(k, "media_title") == 0 || strcmp(k, "hvac_action") == 0)
+             && ev == JSON_EV_STRING)
+        set_str(e->extra, sizeof(e->extra), value);
+}
+
+static void commit_entity(ha_state_parser *sp)
+{
+    ha_client *ha = sp->ha;
+    ha_entity *cur = &sp->cur;
+
+    if (cur->id[0] == '\0')
+        return;
+
+    sp->entities_seen++;
+
+    // Keep the friendly name from the id if there isn't any
+    cur->domain = entity_domain_from_id(cur->id);
+    if (!sp->got_name)
+    {
+        ha_entity tmp;
+        entity_init(&tmp, cur->id);
+        set_str(cur->name, sizeof(cur->name), tmp.name);
+    }
+    cur->loaded = true;
+    cur->pending = false;
+
+    ha_entity *dst = find_entity(ha, cur->id);
+    if (dst == NULL)
+    {
+        if (!sp->add_new)
+            return;
+        if (!entity_domain_supported(cur->domain))
+            return;
+        if (sp->cfg != NULL && !config_domain_allowed(sp->cfg, cur->id))
+            return;
+        if (ha->count >= ENTITY_MAX)
+        {
+            ha->skipped++;
+            return;
+        }
+        dst = &ha->entities[ha->count++];
+    }
+
+    *dst = *cur;
+}
+
+static void begin_entity(ha_state_parser *sp)
+{
+    entity_init(&sp->cur, "");
+    sp->cur.id[0] = '\0';
+    sp->got_name = false;
+    sp->in_entity = true;
+    sp->in_attrs = false;
+    sp->in_color_modes = false;
+    sp->key1[0] = '\0';
+    sp->key2[0] = '\0';
+}
+
+static void json_cb(void *user, json_event ev, const char *value, int depth)
+{
+    ha_state_parser *sp = user;
+
+    // Find out if the document is an array of states or a single state
+    if (sp->base < 0)
+    {
+        if (ev == JSON_EV_ARRAY_START && depth == 0)
+        {
+            sp->base = 1;
+            return;
+        }
+        if (ev == JSON_EV_OBJECT_START && depth == 0)
+            sp->base = 0;
+        else
+            return;
+    }
+
+    const int b = sp->base;
+
+    if (!sp->in_entity)
+    {
+        if (ev == JSON_EV_OBJECT_START && depth == b)
+            begin_entity(sp);
+        return;
+    }
+
+    switch (ev)
+    {
+        case JSON_EV_OBJECT_END:
+            if (depth == b)
+            {
+                commit_entity(sp);
+                sp->in_entity = false;
+            }
+            else if (depth == b + 1)
+            {
+                sp->in_attrs = false;
+            }
+            return;
+
+        case JSON_EV_OBJECT_START:
+            if (depth == b + 1 && strcmp(sp->key1, "attributes") == 0)
+                sp->in_attrs = true;
+            return;
+
+        case JSON_EV_ARRAY_START:
+            if (sp->in_attrs && depth == b + 2
+                && strcmp(sp->key2, "supported_color_modes") == 0)
+                sp->in_color_modes = true;
+            return;
+
+        case JSON_EV_ARRAY_END:
+            if (depth == b + 2)
+                sp->in_color_modes = false;
+            return;
+
+        case JSON_EV_KEY:
+            if (depth == b + 1)
+                set_str(sp->key1, sizeof(sp->key1), value);
+            else if (depth == b + 2 && sp->in_attrs)
+                set_str(sp->key2, sizeof(sp->key2), value);
+            return;
+
+        default:
+            break;
+    }
+
+    // Values
+    if (depth == b + 1)
+    {
+        if (strcmp(sp->key1, "entity_id") == 0 && ev == JSON_EV_STRING)
+        {
+            set_str(sp->cur.id, sizeof(sp->cur.id), value);
+            sp->cur.domain = entity_domain_from_id(value);
+        }
+        else if (strcmp(sp->key1, "state") == 0)
+        {
+            set_str(sp->cur.state, sizeof(sp->cur.state),
+                    ev == JSON_EV_NULL ? "unknown" : value);
+        }
+    }
+    else if (depth == b + 2 && sp->in_attrs)
+    {
+        handle_attribute(sp, ev, value);
+    }
+    else if (depth == b + 3 && sp->in_color_modes && ev == JSON_EV_STRING)
+    {
+        if (strcmp(value, "onoff") != 0 && strcmp(value, "unknown") != 0)
+            sp->cur.dimmable = true;
+    }
+}
+
+ha_state_parser *ha_parser_begin(ha_client *ha, const ha_config *cfg,
+                                 bool add_new)
+{
+    ha_state_parser *sp = &state_parser;
+    memset(sp, 0, sizeof(*sp));
+    sp->ha = ha;
+    sp->cfg = cfg;
+    sp->add_new = add_new;
+    sp->base = -1;
+    json_init(&sp->json, json_cb, sp);
+    return sp;
+}
+
+bool ha_parser_feed(ha_state_parser *sp, const char *data, size_t len)
+{
+    return json_feed(&sp->json, data, len);
+}
+
+bool ha_parser_end(ha_state_parser *sp)
+{
+    return json_finish(&sp->json);
+}
+
+// HTTP helpers
+// ------------
+
+typedef struct {
+    ha_state_parser *sp;
+    ha_progress_cb progress;
+    void *user;
+    int last_seen;
+} fetch_ctx;
+
+static bool fetch_data_cb(void *user, const char *data, size_t len)
+{
+    fetch_ctx *ctx = user;
+    if (!ha_parser_feed(ctx->sp, data, len))
+        return false;
+
+    if (ctx->progress && ctx->sp->entities_seen != ctx->last_seen)
+    {
+        ctx->last_seen = ctx->sp->entities_seen;
+        ctx->progress(ctx->user, ctx->sp->entities_seen, -1);
+    }
+    return true;
+}
+
+static bool status_ok(ha_client *ha, const http_result *res)
+{
+    ha->last_status = res->status;
+
+    if (res->status == 0)
+    {
+        set_str(ha->error, sizeof(ha->error), res->error);
+        return false;
+    }
+    if (res->status == 401 || res->status == 403)
+    {
+        snprintf(ha->error, sizeof(ha->error),
+                 "Access denied (HTTP %d). Check the token.", res->status);
+        return false;
+    }
+    if (res->status < 200 || res->status >= 300)
+    {
+        snprintf(ha->error, sizeof(ha->error), "Server error: HTTP %d",
+                 res->status);
+        return false;
+    }
+    ha->error[0] = '\0';
+    return true;
+}
+
+static bool ignore_body(void *user, const char *data, size_t len)
+{
+    (void)user;
+    (void)data;
+    (void)len;
+    return true;
+}
+
+bool ha_check(ha_client *ha)
+{
+    if (ha->demo)
+        return true;
+
+    http_result res;
+    if (!http_request(&ha->http, "GET", "/api/", ha->headers, NULL,
+                      ignore_body, NULL, &res))
+    {
+        ha->last_status = 0;
+        set_str(ha->error, sizeof(ha->error), res.error);
+        return false;
+    }
+    if (res.status == 404)
+    {
+        snprintf(ha->error, sizeof(ha->error),
+                 "HTTP 404: is this a Home Assistant server?");
+        return false;
+    }
+    return status_ok(ha, &res);
+}
+
+static bool fetch_states(ha_client *ha, const ha_config *cfg, const char *path,
+                         bool add_new, ha_progress_cb progress, void *user)
+{
+    fetch_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.sp = ha_parser_begin(ha, cfg, add_new);
+    ctx.progress = progress;
+    ctx.user = user;
+
+    http_result res;
+    bool ok = http_request(&ha->http, "GET", path, ha->headers, NULL,
+                           fetch_data_cb, &ctx, &res);
+    if (!ok)
+    {
+        ha->last_status = 0;
+        if (ctx.sp->json.error)
+            set_str(ha->error, sizeof(ha->error), "Invalid JSON from server");
+        else
+            set_str(ha->error, sizeof(ha->error), res.error);
+        return false;
+    }
+
+    if (!status_ok(ha, &res))
+        return false;
+
+    if (!ha_parser_end(ctx.sp))
+    {
+        set_str(ha->error, sizeof(ha->error), "Invalid JSON from server");
+        return false;
+    }
+    return true;
+}
+
+static int compare_entities(const void *a, const void *b)
+{
+    const ha_entity *ea = a;
+    const ha_entity *eb = b;
+    int da = entity_domain_sort_key(ea->domain);
+    int db = entity_domain_sort_key(eb->domain);
+    if (da != db)
+        return da - db;
+    return strcasecmp(ea->name, eb->name);
+}
+
+void ha_sort(ha_client *ha)
+{
+    qsort(ha->entities, (size_t)ha->count, sizeof(ha_entity),
+          compare_entities);
+}
+
+static bool demo_load(ha_client *ha, const ha_config *cfg)
+{
+    // In manual mode only the configured entities are updated
+    ha_state_parser *sp = ha_parser_begin(ha, cfg, ha->auto_mode);
+    if (ha->auto_mode)
+    {
+        ha->count = 0;
+        ha->skipped = 0;
+    }
+    if (!ha_parser_feed(sp, demo_states_json, strlen(demo_states_json))
+        || !ha_parser_end(sp))
+    {
+        set_str(ha->error, sizeof(ha->error), "Invalid demo data");
+        return false;
+    }
+    if (ha->auto_mode)
+        ha_sort(ha);
+    return true;
+}
+
+// Simulates the result of an action in demo mode
+static void demo_action(ha_entity *e, entity_action a)
+{
+    const char *st = e->state;
+
+    if (a == ACT_PRIMARY)
+    {
+        switch (e->domain)
+        {
+            case DOM_COVER:
+                st = strcmp(st, "closed") == 0 ? "open" : "closed";
+                e->position = strcmp(st, "open") == 0 ? 100.0f : 0.0f;
+                break;
+            case DOM_LOCK:
+                st = strcmp(st, "locked") == 0 ? "unlocked" : "locked";
+                break;
+            case DOM_CLIMATE:
+                st = strcmp(st, "off") == 0 ? "heat" : "off";
+                break;
+            case DOM_MEDIA_PLAYER:
+                st = strcmp(st, "playing") == 0 ? "paused" : "playing";
+                break;
+            case DOM_VACUUM:
+                st = entity_is_on(e) ? "returning" : "cleaning";
+                break;
+            case DOM_SCENE:
+            case DOM_SCRIPT:
+            case DOM_BUTTON:
+            case DOM_INPUT_BUTTON:
+                return;
+            default:
+                st = strcmp(st, "on") == 0 ? "off" : "on";
+                if (e->domain == DOM_LIGHT && strcmp(st, "on") == 0
+                    && e->dimmable && e->brightness == ATTR_NONE)
+                    e->brightness = 255;
+                break;
+        }
+        set_str(e->state, sizeof(e->state), st);
+        return;
+    }
+
+    float sign = a == ACT_DECREASE ? -1.0f : 1.0f;
+    switch (e->domain)
+    {
+        case DOM_LIGHT:
+        {
+            float b = e->brightness == ATTR_NONE ? 0 : e->brightness;
+            b += sign * 25.5f;
+            if (b > 255)
+                b = 255;
+            if (b <= 0)
+            {
+                e->brightness = ATTR_NONE;
+                set_str(e->state, sizeof(e->state), "off");
+            }
+            else
+            {
+                e->brightness = b;
+                set_str(e->state, sizeof(e->state), "on");
+            }
+            break;
+        }
+        case DOM_CLIMATE:
+            e->target_temperature += sign * (e->target_temp_step != ATTR_NONE
+                                                 ? e->target_temp_step : 0.5f);
+            break;
+        case DOM_MEDIA_PLAYER:
+            e->volume += sign * 0.05f;
+            if (e->volume < 0)
+                e->volume = 0;
+            if (e->volume > 1)
+                e->volume = 1;
+            break;
+        case DOM_COVER:
+            set_str(e->state, sizeof(e->state), sign > 0 ? "open" : "closed");
+            e->position = sign > 0 ? 100.0f : 0.0f;
+            break;
+        case DOM_NUMBER:
+        case DOM_INPUT_NUMBER:
+        {
+            float v = (float)atof(e->state) + sign * (e->step > 0 ? e->step : 1);
+            if (v < e->min_value)
+                v = e->min_value;
+            if (v > e->max_value)
+                v = e->max_value;
+            snprintf(e->state, sizeof(e->state), "%.1f", (double)v);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+bool ha_load_all(ha_client *ha, const ha_config *cfg, ha_progress_cb progress,
+                 void *user)
+{
+    if (ha->demo)
+        return demo_load(ha, cfg);
+
+    if (ha->auto_mode)
+    {
+        ha->count = 0;
+        ha->skipped = 0;
+        if (!fetch_states(ha, cfg, "/api/states", true, progress, user))
+            return false;
+        ha_sort(ha);
+        return true;
+    }
+
+    // Manual mode: one small request per entity is much faster than
+    // downloading every state of a big installation.
+    for (int i = 0; i < ha->count; i++)
+    {
+        if (!ha_refresh(ha, &ha->entities[i]))
+        {
+            // A missing entity isn't fatal, but a network error is
+            if (ha->last_status == 0 || ha->last_status == 401
+                || ha->last_status == 403)
+                return false;
+        }
+        if (progress)
+            progress(user, i + 1, ha->count);
+    }
+    ha->error[0] = '\0';
+    return true;
+}
+
+bool ha_refresh(ha_client *ha, ha_entity *e)
+{
+    if (ha->demo)
+    {
+        e->pending = false;
+        return true;
+    }
+
+    char path[128];
+    snprintf(path, sizeof(path), "/api/states/%s", e->id);
+
+    bool ok = fetch_states(ha, NULL, path, false, NULL, NULL);
+    if (!ok && ha->last_status == 404)
+    {
+        set_str(e->state, sizeof(e->state), "unavailable");
+        set_str(e->extra, sizeof(e->extra), "Entity not found");
+        e->loaded = true;
+        e->pending = false;
+    }
+    return ok;
+}
+
+bool ha_action(ha_client *ha, ha_entity *e, entity_action a)
+{
+    char domain[32], service[32], body[192], path[96];
+
+    if (!entity_build_service(e, a, domain, sizeof(domain), service,
+                              sizeof(service), body, sizeof(body)))
+    {
+        set_str(ha->error, sizeof(ha->error), "Action not supported");
+        return false;
+    }
+
+    if (ha->demo)
+    {
+        demo_action(e, a);
+        e->pending = false;
+        return true;
+    }
+
+    snprintf(path, sizeof(path), "/api/services/%s/%s", domain, service);
+
+    fetch_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.sp = ha_parser_begin(ha, NULL, false);
+
+    e->pending = true;
+
+    http_result res;
+    if (!http_request(&ha->http, "POST", path, ha->headers, body,
+                      fetch_data_cb, &ctx, &res))
+    {
+        ha->last_status = 0;
+        set_str(ha->error, sizeof(ha->error), res.error);
+        e->pending = false;
+        return false;
+    }
+
+    if (!status_ok(ha, &res))
+    {
+        if (res.status == 400)
+            snprintf(ha->error, sizeof(ha->error), "HA rejected %s.%s",
+                     domain, service);
+        e->pending = false;
+        return false;
+    }
+
+    // The response contains the states that changed. If ours wasn't in it
+    // (the device is slow), keep it as pending so that the UI refreshes it.
+    ha_parser_end(ctx.sp);
+    return true;
+}
