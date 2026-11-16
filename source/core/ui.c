@@ -281,6 +281,8 @@ static void draw_info_panel(app_t *app, color_t *fb)
     gfx_text(fb, 10, y, "Y refresh  SELECT filter", C_MUTED, 1, 0);
     y += 10;
     gfx_text(fb, 10, y, "START reload all", C_MUTED, 1, 0);
+    y += 12;
+    gfx_text(fb, 10, y, "A: sign in / set up again", C_ACCENT, 1, 0);
 }
 
 static void draw_top_dashboard(app_t *app, color_t *fb)
@@ -478,6 +480,14 @@ void app_draw(app_t *app, color_t *top, color_t *bottom)
     if (app->screen == SCREEN_MESSAGE)
     {
         draw_message(app, top, bottom);
+    }
+    else if (app->screen == SCREEN_KEYBOARD)
+    {
+        kbd_draw(&app->kbd, top, bottom);
+    }
+    else if (app->screen == SCREEN_PICKER)
+    {
+        picker_draw(&app->picker, top, bottom);
     }
     else
     {

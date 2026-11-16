@@ -17,7 +17,7 @@ BUILD   := build
 
 .PHONY: all test clean screenshots
 
-all: $(BUILD)/test_core $(BUILD)/test_http $(BUILD)/render
+all: $(BUILD)/test_core $(BUILD)/test_http $(BUILD)/test_discover $(BUILD)/test_setup $(BUILD)/render
 
 $(BUILD)/%: %.c $(COMMON) $(wildcard ../source/core/*.h) testlib.h
 	@mkdir -p $(BUILD)
@@ -26,6 +26,8 @@ $(BUILD)/%: %.c $(COMMON) $(wildcard ../source/core/*.h) testlib.h
 test: all
 	$(BUILD)/test_core
 	python3 run_http_tests.py $(BUILD)/test_http
+	python3 run_http_tests.py --discover $(BUILD)/test_discover
+	python3 run_http_tests.py --setup $(BUILD)/test_setup
 
 screenshots: $(BUILD)/render
 	python3 run_http_tests.py --screenshots $(BUILD)/render ../docs/screenshots

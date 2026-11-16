@@ -16,7 +16,8 @@
 typedef struct {
     char host[128];
     int port;
-    char token[512];
+    char token[512];         // Long-lived access token...
+    char refresh_token[512]; // ...or refresh token from the sign in screen
 
     // Optional WiFi settings. If ssid is empty, the networks saved in the
     // console's WFC settings are used.
@@ -46,6 +47,13 @@ bool config_parse(ha_config *cfg, const char *text, char *err, size_t errlen);
 // Load and parse a config file from disk.
 bool config_load_file(ha_config *cfg, const char *path, char *err,
                       size_t errlen);
+
+// Writes the config to a file (used by the setup wizard). Returns false on
+// error.
+bool config_save_file(const ha_config *cfg, const char *path);
+
+// Same, into a memory buffer. Returns the length written.
+size_t config_write(const ha_config *cfg, char *out, size_t out_len);
 
 // Returns true if the domain of entity_id is allowed by cfg->domains (or if
 // the list is empty).

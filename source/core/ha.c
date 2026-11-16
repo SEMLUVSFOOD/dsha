@@ -38,6 +38,13 @@ void ha_init(ha_client *ha, const ha_config *cfg)
     http_client_init(&ha->http, cfg->host, cfg->port);
     snprintf(ha->headers, sizeof(ha->headers),
              "Authorization: Bearer %s\r\n", cfg->token);
+    if (cfg->token[0] == '\0')
+    {
+        // Get an access token with the first request
+        snprintf(ha->refresh_token, sizeof(ha->refresh_token), "%s",
+                 cfg->refresh_token);
+        ha->headers[0] = '\0';
+    }
 
     ha->demo = cfg->demo;
     ha->auto_mode = cfg->num_entities == 0;
@@ -287,6 +294,65 @@ bool ha_parser_end(ha_state_parser *sp)
 // HTTP helpers
 // ------------
 
+// Gets a new access token using the refresh token
+static bool renew_access_token(ha_client *ha)
+{
+    static char access[AUTH_TOKEN_LEN];
+    bool revoked = false;
+
+    if (!auth_refresh(&ha->http, ha->refresh_token, access, sizeof(access),
+                      &revoked, ha->error, sizeof(ha->error)))
+    {
+        ha->signed_out = revoked;
+        return false;
+    }
+    snprintf(ha->headers, sizeof(ha->headers),
+             "Authorization: Bearer %s\r\n", access);
+    return true;
+}
+
+// Sends an authenticated request. When signed in with a refresh token, an
+// expired access token is renewed and the request is repeated.
+static bool ha_http(ha_client *ha, const char *method, const char *path,
+                    const char *body, http_data_cb cb, void *user,
+                    http_result *res)
+{
+    if (ha->refresh_token[0] != '\0' && ha->headers[0] == '\0')
+    {
+        if (!renew_access_token(ha))
+        {
+            if (ha->signed_out)
+            {
+                res->status = 401; // Reported as "signed out"
+                return true;
+            }
+            res->status = 0;
+            snprintf(res->error, sizeof(res->error), "%s", ha->error);
+            return false;
+        }
+    }
+
+    bool ok = http_request(&ha->http, method, path, ha->headers, body, cb,
+                           user, res);
+
+    if (ok && res->status == 401 && ha->refresh_token[0] != '\0')
+    {
+        if (!renew_access_token(ha))
+        {
+            if (!ha->signed_out)
+            {
+                res->status = 0;
+                snprintf(res->error, sizeof(res->error), "%s", ha->error);
+                return false;
+            }
+            return true; // Report the 401
+        }
+        ok = http_request(&ha->http, method, path, ha->headers, body, cb,
+                          user, res);
+    }
+    return ok;
+}
+
 typedef struct {
     ha_state_parser *sp;
     ha_progress_cb progress;
@@ -319,8 +385,15 @@ static bool status_ok(ha_client *ha, const http_result *res)
     }
     if (res->status == 401 || res->status == 403)
     {
-        snprintf(ha->error, sizeof(ha->error),
-                 "Access denied (HTTP %d). Check the token.", res->status);
+        if (ha->signed_out)
+            snprintf(ha->error, sizeof(ha->error),
+                     "Signed out by Home Assistant. Please sign in again.");
+        else if (ha->refresh_token[0] != '\0')
+            snprintf(ha->error, sizeof(ha->error),
+                     "Access denied (HTTP %d).", res->status);
+        else
+            snprintf(ha->error, sizeof(ha->error),
+                     "Access denied (HTTP %d). Check the token.", res->status);
         return false;
     }
     if (res->status < 200 || res->status >= 300)
@@ -347,8 +420,7 @@ bool ha_check(ha_client *ha)
         return true;
 
     http_result res;
-    if (!http_request(&ha->http, "GET", "/api/", ha->headers, NULL,
-                      ignore_body, NULL, &res))
+    if (!ha_http(ha, "GET", "/api/", NULL, ignore_body, NULL, &res))
     {
         ha->last_status = 0;
         set_str(ha->error, sizeof(ha->error), res.error);
@@ -373,8 +445,7 @@ static bool fetch_states(ha_client *ha, const ha_config *cfg, const char *path,
     ctx.user = user;
 
     http_result res;
-    bool ok = http_request(&ha->http, "GET", path, ha->headers, NULL,
-                           fetch_data_cb, &ctx, &res);
+    bool ok = ha_http(ha, "GET", path, NULL, fetch_data_cb, &ctx, &res);
     if (!ok)
     {
         ha->last_status = 0;
@@ -609,8 +680,7 @@ bool ha_action(ha_client *ha, ha_entity *e, entity_action a)
     e->pending = true;
 
     http_result res;
-    if (!http_request(&ha->http, "POST", path, ha->headers, body,
-                      fetch_data_cb, &ctx, &res))
+    if (!ha_http(ha, "POST", path, body, fetch_data_cb, &ctx, &res))
     {
         ha->last_status = 0;
         set_str(ha->error, sizeof(ha->error), res.error);

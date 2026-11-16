@@ -196,6 +196,7 @@ typedef struct {
     http_data_cb cb;
     void *user;
     bool aborted;
+    bool error_body; // Deliver the body of non-2xx responses too
 
     bool headers_done;
     char header[HTTP_HEADER_MAX];
@@ -215,6 +216,8 @@ typedef struct {
 static void deliver(resp_parser *p, const char *data, size_t len)
 {
     if (len == 0 || p->aborted || p->cb == NULL)
+        return;
+    if (!p->error_body && (p->status < 200 || p->status >= 300))
         return;
     if (!p->cb(p->user, data, len))
         p->aborted = true;
@@ -540,9 +543,44 @@ static int attempt(http_client *c, const char *request, size_t request_len,
     return ATTEMPT_OK;
 }
 
+void http_urlencode(char *out, size_t out_len, const char *value)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    size_t len = strlen(out);
+
+    for (const unsigned char *p = (const unsigned char *)value; *p; p++)
+    {
+        if (len + 4 >= out_len)
+            break;
+        unsigned char c = *p;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+            || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.'
+            || c == '~')
+        {
+            out[len++] = (char)c;
+        }
+        else
+        {
+            out[len++] = '%';
+            out[len++] = hex[c >> 4];
+            out[len++] = hex[c & 15];
+        }
+    }
+    out[len] = '\0';
+}
+
 bool http_request(http_client *c, const char *method, const char *path,
                   const char *extra_headers, const char *body,
                   http_data_cb cb, void *user, http_result *res)
+{
+    return http_request_ex(c, method, path, extra_headers, body,
+                           "application/json", false, cb, user, res);
+}
+
+bool http_request_ex(http_client *c, const char *method, const char *path,
+                     const char *extra_headers, const char *body,
+                     const char *content_type, bool error_body,
+                     http_data_cb cb, void *user, http_result *res)
 {
     static char request[2048];
     static resp_parser parser;
@@ -565,10 +603,11 @@ bool http_request(http_client *c, const char *method, const char *path,
                        "User-Agent: DSHA (Nintendo DS)\r\n"
                        "Accept: application/json\r\n"
                        "Connection: keep-alive\r\n"
-                       "Content-Type: application/json\r\n"
+                       "Content-Type: %s\r\n"
                        "Content-Length: %u\r\n"
                        "%s\r\n",
-                       method, path, host_header, (unsigned)strlen(body),
+                       method, path, host_header, content_type,
+                       (unsigned)strlen(body),
                        extra_headers ? extra_headers : "");
     }
     else
@@ -604,6 +643,7 @@ bool http_request(http_client *c, const char *method, const char *path,
         memset(&parser, 0, sizeof(parser));
         parser.cb = cb;
         parser.user = user;
+        parser.error_body = error_body;
         parser.content_length = -1;
 
         int r = attempt(c, request, (size_t)len, body, &parser, res, reused);

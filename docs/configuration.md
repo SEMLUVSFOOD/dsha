@@ -1,5 +1,11 @@
 # Configuration reference
 
+**You normally don't need this page**: the setup wizard (shown when there is
+no config file) connects to WiFi, finds Home Assistant, signs you in and
+writes `/dsha/config.ini` for you. Edit the file if you want to fine tune
+things like the list of entities. To run the wizard again, press **X** in the
+dashboard and then **A**, or delete the file.
+
 DSHA reads a plain text file with `key = value` lines. Lines starting with `#`
 or `;` are comments. Keys are case insensitive, values can optionally be
 quoted. Unknown keys are ignored.
@@ -18,8 +24,10 @@ The first file found is used:
 | `dsha/config.ini`, `config.ini` | Relative to the folder of `dsha.nds` (when the loader passes it) |
 | `nitro:/config.ini` | Embedded in the ROM at build time (see below) |
 
-If the file exists but is wrong (for example, no token), DSHA shows the error
-instead of looking for other files.
+If the file exists but is wrong (for example, no token), DSHA shows the
+problem on the welcome screen and offers to run the setup, which writes a new
+file. The wizard saves to the file that was loaded, or to `sd:/dsha/config.ini`
+(DSi SD card) or `fat:/dsha/config.ini` (flashcart).
 
 ## Options
 
@@ -27,7 +35,8 @@ instead of looking for other files.
 |---|---|---|
 | `host` | *(required)* | IP address or DNS name of Home Assistant. `http://192.168.1.10:8123/` style URLs are accepted too (the port in the URL is used). `.local` names don't work. |
 | `port` | `8123` | TCP port of Home Assistant. |
-| `token` | *(required)* | Long-lived access token. |
+| `token` | *(see below)* | Long-lived access token. |
+| `refresh_token` | *(see below)* | Session created by signing in with the setup wizard. Written by DSHA; you can revoke it in your Home Assistant profile (*Security → Refresh tokens*, listed as `https://github.com/semluvsfood/dsha`). |
 | `wifi_ssid` | *(empty)* | Network to connect to. If empty, the WiFi settings saved in the console (WFC / DSi settings) are used. Hidden networks are supported. |
 | `wifi_password` | *(empty)* | Password of `wifi_ssid`. Empty for open networks. WEP keys must be 5 or 13 ASCII characters. |
 | `title` | `Home Assistant` | Text shown in the top bar. |
@@ -35,6 +44,10 @@ instead of looking for other files.
 | `entity` | *(none)* | An entity to show. Repeat the line for more entities, or list several separated by commas. They are shown in this order. Up to 128. |
 | `domains` | *(all)* | Only used when there are no `entity` lines: comma separated list of the domains to show, like `light, switch, climate`. |
 | `demo` | `0` | `1` starts an offline demo with fake entities. No WiFi or server needed. |
+
+Either `token` or `refresh_token` is required (the wizard writes
+`refresh_token`; a long-lived token pasted in the phone page is written as
+`token`).
 
 `url`, `ssid`, `password`, `entities` and `refresh` are accepted as aliases of
 `host`, `wifi_ssid`, `wifi_password`, `entity` and `refresh_seconds`. A line
@@ -74,9 +87,12 @@ one.
 
 ## Security notes
 
-- The token gives full access to your Home Assistant account. Create a
-  dedicated token for the DS (so you can revoke it any time) and consider a
-  dedicated non-admin user for it.
+- The token or session in `config.ini` gives access to your Home Assistant
+  account: treat the SD card like a key. You can revoke it any time from your
+  Home Assistant profile. Consider a dedicated non-admin user for the DS.
+- Your password is only used to sign in and is never written to the SD card.
+- During setup, the DS serves the sign in page on port 80 of your local
+  network. It stops as soon as you are signed in.
 - The connection is plain HTTP, so anyone able to sniff your WiFi network can
   see the token. WEP is easy to break: if you use a WEP or open network for
   the DS, isolate it from the rest of your network.

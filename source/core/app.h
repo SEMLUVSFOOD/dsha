@@ -15,8 +15,9 @@
 #include "config.h"
 #include "gfx.h"
 #include "ha.h"
+#include "widgets.h"
 
-#define DSHA_VERSION "1.0.0"
+#define DSHA_VERSION "1.1.0"
 
 // Logical buttons (the platform maps hardware keys to these)
 enum {
@@ -44,6 +45,8 @@ typedef struct {
 typedef enum {
     SCREEN_MESSAGE,   // Full screen message (errors, loading...)
     SCREEN_DASHBOARD,
+    SCREEN_KEYBOARD,  // Setup: on-screen keyboard (app->kbd)
+    SCREEN_PICKER,    // Setup: list of choices (app->picker)
 } app_screen;
 
 typedef enum {
@@ -124,7 +127,12 @@ typedef struct {
     // Clock (filled by the platform layer)
     int hour, minute;
 
+    // Setup widgets
+    keyboard kbd;
+    picker picker;
+
     bool request_reload; // The user wants a full reload (START)
+    bool request_setup;  // The user wants to run the setup again
     bool dirty;
 } app_t;
 
@@ -144,6 +152,10 @@ bool app_update(app_t *app, const app_input *in, uint32_t now_ms);
 void app_draw(app_t *app, color_t *top, color_t *bottom);
 
 void app_toast(app_t *app, const char *text, bool error);
+
+// Show the keyboard / picker (initialize app->kbd / app->picker first)
+void app_show_keyboard(app_t *app);
+void app_show_picker(app_t *app);
 
 const char *app_filter_name(app_filter f);
 

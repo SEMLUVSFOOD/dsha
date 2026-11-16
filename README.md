@@ -20,6 +20,9 @@ or the buttons.
 - **Works with big installations**: the JSON parser streams the response, so
   thousands of entities don't need to fit in the DS's 4 MB of RAM.
 - **Auto refresh** of the visible entities, keep-alive HTTP connections.
+- **Easy setup**: a wizard finds your WiFi and your Home Assistant server,
+  and you sign in from your phone (or the DS keyboard) with your normal
+  account. No tokens to copy, no files to edit.
 - **Offline demo mode** to try it without a server.
 - **Open source** (MIT), with desktop unit tests and a fake Home Assistant
   server for development.
@@ -48,59 +51,40 @@ or the buttons.
 | Emulators | — | melonDS (with WiFi emulation) or the offline demo in any emulator. |
 
 **Home Assistant** — any recent version, reachable on your local network over
-plain HTTP (the default `http://<ip>:8123`). You need a
-[long-lived access token](#2-create-a-token).
+plain HTTP (the default `http://<ip>:8123`). You sign in with your normal Home
+Assistant user name and password; no token or config file needed.
 
 ## Quick start
 
-### 1. Get `dsha.nds`
+**1. Copy `dsha.nds` to your SD card.** Download it from the
+[Releases page](https://github.com/semluvsfood/dsha/releases) (or
+[build it yourself](docs/building.md)).
 
-Download `dsha.nds` from the
-[Releases page](https://github.com/semluvsfood/dsha/releases), or
-[build it yourself](docs/building.md).
+**2. Start it** from your flashcart menu or TWiLight Menu++ and tap
+**Start setup**. The wizard does the rest:
 
-### 2. Create a token
+| | |
+|---|---|
+| <img src="docs/screenshots/09_setup_welcome.png" width="200"> | **WiFi.** DSHA first tries the WiFi settings saved in the console. If there are none, it lists the networks around you: tap yours and type the password on the touch keyboard. |
+| <img src="docs/screenshots/12_setup_found.png" width="200"> | **Find Home Assistant.** DSHA searches your network and lists the Home Assistant servers it finds. Tap yours. (You can also type the IP address.) |
+| <img src="docs/screenshots/13_setup_signin.png" width="200"> | **Sign in.** The DS shows an address like `http://192.168.1.57`. Open it on your **phone or computer** and sign in with your Home Assistant user name and password, like on the Home Assistant website. Prefer the DS? Tap **Type on the DS** and use the keyboard. Two-factor codes are supported. |
 
-In Home Assistant, click your **user name** (bottom left) → **Security** tab →
-**Long-lived access tokens** → **Create token**. Name it "Nintendo DS" and copy
-the token (you only see it once).
+<p align="center">
+  <img src="docs/screenshots/phone_signin.png" width="240" alt="Sign in page on a phone">
+</p>
 
-### 3. Write the config file
+**3. Done.** The settings are saved to `/dsha/config.ini` on the SD card, so
+next time DSHA goes straight to your dashboard. Your password isn't stored:
+DSHA keeps a session (refresh token) that you can revoke any time in your Home
+Assistant profile → *Security* → *Refresh tokens*.
 
-Create a file called `config.ini` in a folder called `dsha` on your SD card
-(so the path is `/dsha/config.ini`):
-
-```ini
-host = 192.168.1.10
-token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-Use the **IP address** of your Home Assistant server (you can see it in
-Settings → System → Network). That's all that is required.
-[`config.example.ini`](config.example.ini) shows all the options, like picking
-which entities to show or using a specific WiFi network.
-
-### 4. Set up WiFi on the console
-
-DSHA uses the WiFi connections saved in the console:
-
-- **DS / DS Lite**: start any game with Nintendo WFC support (Mario Kart DS,
-  Pokémon...) and set up a connection under *Nintendo WFC Settings*.
-- **DSi**: *System Settings → Internet → Connection Settings*. WPA2 networks
-  go in the *Advanced Setup* slots 4-6.
-- **3DS**: set up a connection in the *Nintendo WFC Settings* of any DS game
-  (DS-mode connections only support open and WEP networks).
-
-Or put `wifi_ssid` and `wifi_password` in `config.ini` instead.
-
-### 5. Run it
-
-Copy `dsha.nds` to the SD card and start it from your flashcart menu or
-TWiLight Menu++. It connects to WiFi, loads your entities and shows the
-dashboard.
-
-> **Tip**: no server yet? Start DSHA without a config file and press **A** to
-> try the offline demo.
+> **Tips**
+> - No server yet? Tap **Try the demo** on the welcome screen.
+> - To sign in with another account or server later, press **X** in the
+>   dashboard and then **A**.
+> - Prefer config files or long-lived tokens? That still works, see the
+>   [configuration reference](docs/configuration.md). You can also paste a
+>   token in the phone sign in page.
 
 ## Controls
 
@@ -114,7 +98,7 @@ dashboard.
 | **Y** or ⟳ button | Refresh the entities on screen now |
 | **SELECT** or the middle button | Filter: All, Lights, Switches, Climate, Covers & locks, Media, Scenes & scripts, Sensors |
 | **◀ / ▶ buttons** | Previous / next page |
-| **X** | Info panel (server, IP, traffic, help) |
+| **X** | Info panel (server, IP, traffic, help). Press **A** there to sign in again or change server |
 | **START** | Reload all entities |
 | **START + SELECT** (hold) | Exit |
 
@@ -144,8 +128,9 @@ Entities from other domains are shown (read only) when you list them with
 
 - **No HTTPS.** TLS on a 67 MHz CPU is slow and memory hungry, so DSHA talks
   plain HTTP. Use the local address of Home Assistant, not your Nabu Casa or
-  other remote `https://` URL. Only use DSHA on a network you trust: the token
-  travels unencrypted (as with any `http://` access to Home Assistant).
+  other remote `https://` URL. Only use DSHA on a network you trust: the
+  sign in and the session token travel unencrypted (as with any `http://`
+  access to Home Assistant).
 - **WPA2 only on DSi.** The original DS WiFi hardware only supports open and
   WEP networks. If your router is WPA2-only, use a DSi, or create an open/WEP
   guest network (ideally isolated, with only Home Assistant reachable).
@@ -158,16 +143,18 @@ Entities from other domains are shown (read only) when you list them with
 ## Project status
 
 The app has been tested with the desktop test suite (HTTP client, streaming
-parser and UI logic against a fake Home Assistant server) and the real `.nds`
-has been run in an emulator in demo mode. See the
+parser, sign in, network discovery, phone setup page and UI logic against a
+fake Home Assistant server) and the real `.nds` has been run in an emulator
+(dashboard in demo mode, setup wizard screens and keyboard). The WiFi parts
+haven't been tried on real hardware yet. See the
 [changelog](CHANGELOG.md). Reports from real hardware are very welcome:
 please [open an issue](https://github.com/semluvsfood/dsha/issues) with your
 console model and how you launched DSHA.
 
 <p align="center">
+  <img src="docs/screenshots/emulator_welcome.png" width="256" alt="Setup running in DeSmuME">
   <img src="docs/screenshots/emulator_tap.png" width="256" alt="Running in DeSmuME">
   <img src="docs/screenshots/03_brightness.png" width="256" alt="Dimming a light">
-  <img src="docs/screenshots/07_info.png" width="256" alt="Info panel">
 </p>
 
 ## License

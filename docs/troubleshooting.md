@@ -1,6 +1,36 @@
 # Troubleshooting
 
-## "No config file found"
+## Setup wizard
+
+**"Home Assistant not found"** — The automatic search tries the host name
+`homeassistant` and then every address of your network (the last number,
+1-254) on port 8123. It won't find Home Assistant if it's on another subnet or
+another port, behind HTTPS only, or if the DS is on an isolated guest network.
+Tap *Type the address* and enter the IP (*Settings → System → Network* in Home
+Assistant shows it), adding `:port` if it isn't 8123.
+
+**The phone page doesn't open** — The phone must be on the same WiFi network
+as the DS. Type the address exactly as shown, starting with `http://` (not
+`https://`). Some browsers try HTTPS first; if you get a security warning,
+choose to continue to the site. You can always tap *Type on the DS* instead.
+
+**"Wrong user name or password"** — Use your Home Assistant **user name**,
+which can be different from the display name: check it in *Settings →
+People → Users* (advanced mode) or ask your admin. User names are usually
+lowercase.
+
+**Two-factor authentication** — If your account has it, you'll be asked for
+the code from your authenticator app (on the phone page or on the DS).
+
+**"Signed out"** — The session of the DS was deleted in Home Assistant (or not
+used for 90 days). Sign in again; the WiFi and server settings are kept.
+
+**Other sign in methods** — If your Home Assistant only allows other
+providers (like trusted networks), create a long-lived access token in your
+profile and paste it in the phone page (*Use a long-lived access token
+instead*).
+
+## My config file is ignored
 
 - The file must be called `config.ini` inside a folder called `dsha` in the
   root of the SD card: `/dsha/config.ini`. Watch out for `config.ini.txt`

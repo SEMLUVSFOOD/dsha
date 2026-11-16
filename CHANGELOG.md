@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.0 — 2026-11-16
+
+Setup is now as easy as we could make it: no config file or token needed.
+
+- First-run setup wizard.
+- WiFi network list with an on-screen touch keyboard for the password (the
+  networks saved in the console are still tried first).
+- Automatic discovery of Home Assistant in the local network.
+- Sign in with your Home Assistant user name and password, from your phone
+  (the DS serves a sign in page) or with the DS keyboard. Two-factor
+  authentication supported. Long-lived tokens can still be used.
+- Sessions are renewed automatically; a clear "Signed out" message if the
+  session is revoked.
+- The settings are saved to `/dsha/config.ini` by the wizard. Run it again
+  from the info panel (X, then A).
+- Demo mode available from the welcome screen.
+
 ## 1.0.0 — 2026-11-16
 
 First release.

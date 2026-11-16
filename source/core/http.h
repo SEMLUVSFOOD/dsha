@@ -43,11 +43,22 @@ void http_client_init(http_client *c, const char *host, int port);
 void http_client_close(http_client *c);
 
 // Sends a request. extra_headers can be NULL, otherwise it must contain full
-// "Name: value\r\n" lines. body can be NULL. The response body is passed to
-// cb (which can be NULL). Returns true if a complete HTTP response has been
-// received (any status code).
+// "Name: value\r\n" lines. body can be NULL; it is sent as JSON. The body of
+// successful (2xx) responses is passed to cb (which can be NULL); the body of
+// other responses is discarded. Returns true if a complete HTTP response has
+// been received (any status code).
 bool http_request(http_client *c, const char *method, const char *path,
                   const char *extra_headers, const char *body,
                   http_data_cb cb, void *user, http_result *res);
+
+// Same as http_request(), with a custom Content-Type for the body. If
+// error_body is true, the body is passed to cb for any status code.
+bool http_request_ex(http_client *c, const char *method, const char *path,
+                     const char *extra_headers, const char *body,
+                     const char *content_type, bool error_body,
+                     http_data_cb cb, void *user, http_result *res);
+
+// Appends "value" URL-encoded (application/x-www-form-urlencoded) to out.
+void http_urlencode(char *out, size_t out_len, const char *value);
 
 #endif // DSHA_HTTP_H

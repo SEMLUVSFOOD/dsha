@@ -40,6 +40,10 @@ make test          # unit tests + network tests against tests/fake_ha.py
 make screenshots   # renders docs/screenshots/*.png with the real UI code
 ```
 
+Besides the unit tests, the suite signs in (with and without two-factor
+authentication), renews expired sessions, scans 127.0.0.0/24 to discover the
+fake server, and drives the phone sign in page like a browser would.
+
 The network tests run three times, with the fake server answering with
 `Content-Length`, with chunked transfer encoding and with
 `Connection: close`, to cover the different ways an HTTP server can frame a
@@ -52,7 +56,8 @@ response. The tests are built with AddressSanitizer and UBSan.
 - **melonDS with WiFi**: melonDS can emulate WiFi. Start the fake server
   (`python3 tests/fake_ha.py --bind 0.0.0.0`), embed a config pointing to your
   PC's LAN IP with `token=testtoken`, and enable WiFi in melonDS. You may need
-  the DS firmware for WiFi settings.
+  the DS firmware for WiFi settings. In the setup, sign in with user `sam`
+  and password `secret` (user `mfa` also asks for the code `123456`).
 
 ## Debugging
 

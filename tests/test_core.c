@@ -13,6 +13,7 @@
 #include "entity.h"
 #include "gfx.h"
 #include "ha.h"
+#include "json_get.h"
 #include "json_stream.h"
 #include "testlib.h"
 
@@ -428,6 +429,176 @@ static void test_touch(void)
     CHECK(app.selected == 1);
 }
 
+static void test_json_get(void)
+{
+    char a[32], b[32], c[32], d[32];
+    json_field f[] = {
+        { "type", a, sizeof(a), false },
+        { "errors.base", b, sizeof(b), false },
+        { "providers.1.id", c, sizeof(c), false },
+        { "missing", d, sizeof(d), false },
+    };
+    CHECK(json_get("{\"x\":[1,{\"type\":\"no\"}],\"type\":\"form\","
+                   "\"errors\":{\"base\":\"invalid_auth\"},"
+                   "\"providers\":[{\"id\":null},{\"id\":\"abc\"}]}", f, 4));
+    CHECK_STR(a, "form");
+    CHECK_STR(b, "invalid_auth");
+    CHECK_STR(c, "abc");
+    CHECK(!f[3].found && d[0] == '\0');
+
+    // Top level arrays
+    json_field g[] = { { "0.type", a, sizeof(a), false } };
+    CHECK(json_get("[{\"type\":\"homeassistant\"}]", g, 1));
+    CHECK_STR(a, "homeassistant");
+}
+
+static void test_config_write(void)
+{
+    static ha_config a, b;
+    static char buf[4096];
+    char err[64];
+
+    config_defaults(&a);
+    snprintf(a.host, sizeof(a.host), "10.0.0.5");
+    a.port = 8124;
+    snprintf(a.refresh_token, sizeof(a.refresh_token), "ref-123");
+    snprintf(a.wifi_ssid, sizeof(a.wifi_ssid), "Net");
+    snprintf(a.wifi_password, sizeof(a.wifi_password), "p w#d");
+    snprintf(a.entities[0], CFG_ENTITY_ID_LEN, "light.a");
+    a.num_entities = 1;
+    a.refresh_seconds = 20;
+
+    config_write(&a, buf, sizeof(buf));
+    config_defaults(&b);
+    CHECK(config_parse(&b, buf, err, sizeof(err)));
+    CHECK_STR(b.host, "10.0.0.5");
+    CHECK(b.port == 8124);
+    CHECK_STR(b.refresh_token, "ref-123");
+    CHECK_STR(b.wifi_ssid, "Net");
+    CHECK_STR(b.wifi_password, "p w#d");
+    CHECK(b.num_entities == 1);
+    CHECK(b.refresh_seconds == 20);
+}
+
+static void tap(keyboard *k, int key)
+{
+    // Tap the middle of the key with the touch screen
+    for (int y = 0; y < 192; y++)
+    {
+        for (int x = 0; x < 256; x++)
+        {
+            if (kbd_key_at(k, x, y) == key)
+            {
+                app_input in = { 0 };
+                in.touching = true;
+                in.tx = x + 3;
+                in.ty = y + 3;
+                kbd_update(k, &in);
+                in.touching = false;
+                kbd_update(k, &in);
+                return;
+            }
+        }
+    }
+    CHECK(0); // Key not found
+}
+
+static void test_keyboard(void)
+{
+    static keyboard k;
+    kbd_init(&k, "User name", "", 16, KBD_TEXT, false, true);
+
+    tap(&k, 10 + 5); // y
+    CHECK_STR(k.text, "y");
+    tap(&k, 40);     // Shift (once)
+    tap(&k, 10 + 5); // Y
+    tap(&k, 10 + 5); // y
+    CHECK_STR(k.text, "yYy");
+    tap(&k, 41);     // Symbols
+    tap(&k, 0);      // !
+    tap(&k, 30 + 5); // é
+    CHECK_STR(k.text, "yYy!\xC3\xA9");
+    tap(&k, 43);     // Backspace removes the whole UTF-8 character
+    CHECK_STR(k.text, "yYy!");
+    tap(&k, 42);     // Space
+    CHECK_STR(k.text, "yYy! ");
+
+    // Buttons: B deletes, D-pad + A types, START finishes
+    app_input in = { 0 };
+    in.down = IN_B;
+    kbd_update(&k, &in);
+    CHECK_STR(k.text, "yYy!");
+    in.down = IN_A; // Cursor starts on "q" (row 1, col 0), symbols layer: '-'
+    kbd_update(&k, &in);
+    CHECK_STR(k.text, "yYy!-");
+
+    // Max length
+    for (int i = 0; i < 20; i++)
+        tap(&k, 0);
+    CHECK(strlen(k.text) == 16);
+
+    CHECK(!k.done);
+    in.down = IN_START;
+    kbd_update(&k, &in);
+    CHECK(k.done);
+
+    // Numeric keypad
+    kbd_init(&k, "Code", "", 6, KBD_NUMERIC, false, false);
+    tap(&k, 0);  // 1
+    tap(&k, 10); // 0
+    tap(&k, 9);  // .
+    tap(&k, 11); // :
+    CHECK_STR(k.text, "10.:");
+    tap(&k, 44); // OK
+    CHECK(k.done);
+}
+
+static void test_picker(void)
+{
+    static picker p;
+    char name[16];
+    picker_init(&p, "Choose", "hint");
+    for (int i = 0; i < 6; i++)
+    {
+        snprintf(name, sizeof(name), "Item %d", i);
+        picker_add(&p, name, "detail");
+    }
+    picker_set_actions(&p, "Rescan", "Other");
+
+    app_input in = { 0 };
+    // Scroll down with the arrow and tap the first visible row
+    in.touching = true; in.tx = 240; in.ty = 120;
+    picker_update(&p, &in);
+    in.touching = false;
+    picker_update(&p, &in);
+    CHECK(p.scroll == 1);
+    in.touching = true; in.tx = 50; in.ty = 10;
+    picker_update(&p, &in);
+    in.touching = false;
+    picker_update(&p, &in);
+    CHECK(p.chosen == 1);
+
+    // Action buttons
+    picker_init(&p, "Choose", "");
+    picker_set_actions(&p, "Rescan", "Other");
+    in.touching = true; in.tx = 200; in.ty = 170;
+    picker_update(&p, &in);
+    in.touching = false;
+    picker_update(&p, &in);
+    CHECK(p.action == 1);
+    CHECK(picker_finished(&p));
+
+    // D-pad and A
+    picker_init(&p, "Choose", "");
+    picker_add(&p, "a", "");
+    picker_add(&p, "b", "");
+    in.down = IN_DOWN;
+    picker_update(&p, &in);
+    in.down = IN_A;
+    picker_update(&p, &in);
+    CHECK(p.chosen == 1);
+}
+
 int main(void)
 {
     test_json();
@@ -437,5 +608,9 @@ int main(void)
     test_utf8();
     test_demo();
     test_touch();
+    test_json_get();
+    test_config_write();
+    test_keyboard();
+    test_picker();
     TEST_REPORT("test_core");
 }

@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 
+#include "auth.h"
 #include "config.h"
 #include "entity.h"
 #include "http.h"
@@ -18,6 +19,11 @@
 typedef struct {
     http_client http;
     char headers[600]; // "Authorization: Bearer ...\r\n"
+
+    // Signed in with user name and password: access tokens are obtained from
+    // the refresh token when needed (they expire after 30 minutes).
+    char refresh_token[AUTH_TOKEN_LEN];
+    bool signed_out; // The refresh token has been revoked
 
     ha_entity entities[ENTITY_MAX];
     int count;

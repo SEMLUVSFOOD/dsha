@@ -15,10 +15,14 @@
 #include <fat.h>
 #include <filesystem.h>
 
+#include <sys/stat.h>
+
 #include "app.h"
 #include "config.h"
+#include "discover.h"
 #include "ha.h"
 #include "platform.h"
+#include "setup_server.h"
 
 // Platform functions
 // ------------------
@@ -162,12 +166,18 @@ static const char *config_paths[] = {
     NULL,
 };
 
-// Returns true if a config file has been loaded, false if the user has chosen
-// the demo mode instead.
-static bool load_config(void)
+static char config_path[64];  // File that was loaded (or "")
+static char config_error[200]; // Why the file couldn't be used
+
+typedef enum {
+    CONFIG_LOADED,
+    CONFIG_MISSING,
+    CONFIG_INVALID,
+} config_status;
+
+static config_status load_config(void)
 {
     char err[128] = "";
-    char first_error[160] = "";
 
     for (int i = 0; config_paths[i] != NULL; i++)
     {
@@ -181,39 +191,43 @@ static bool load_config(void)
         fclose(f);
 
         config_defaults(&cfg);
+        snprintf(config_path, sizeof(config_path), "%s", path);
         if (config_load_file(&cfg, path, err, sizeof(err)))
+            return CONFIG_LOADED;
+
+        // The file exists but it's wrong
+        snprintf(config_error, sizeof(config_error), "%s: %s", path, err);
+        config_defaults(&cfg);
+        return CONFIG_INVALID;
+    }
+
+    config_path[0] = '\0';
+    return CONFIG_MISSING;
+}
+
+// Saves the config written by the setup wizard. Returns false if there is no
+// writable SD card.
+static bool save_config(void)
+{
+    // Keep using the file that was loaded, unless it's the read-only one
+    // embedded in the ROM.
+    if (config_path[0] != '\0' && strncmp(config_path, "nitro:", 6) != 0
+        && config_save_file(&cfg, config_path))
+        return true;
+
+    static const char *const dirs[] = { "sd:/dsha", "fat:/dsha", NULL };
+    for (int i = 0; dirs[i] != NULL; i++)
+    {
+        char path[64];
+        mkdir(dirs[i], 0777);
+        snprintf(path, sizeof(path), "%s/config.ini", dirs[i]);
+        if (config_save_file(&cfg, path))
+        {
+            snprintf(config_path, sizeof(config_path), "%s", path);
             return true;
-
-        // The file exists but it's wrong: report this error
-        snprintf(first_error, sizeof(first_error), "%s: %s", path, err);
-        break;
+        }
     }
-
-    char body[512];
-    if (first_error[0] != '\0')
-    {
-        snprintf(body, sizeof(body), "%s\n\nFix the file and restart DSHA.",
-                 first_error);
-    }
-    else
-    {
-        snprintf(body, sizeof(body),
-                 "Create the file /dsha/config.ini on your SD card:\n\n"
-                 "host=192.168.1.10\n"
-                 "token=<long-lived token>\n\n"
-                 "See the README for all the options.%s",
-                 fat_ok ? "" : "\n\n(Can't access the SD card!)");
-    }
-
-    message_wait(first_error[0] ? "Config error" : "No config file found",
-                 body, "A: try the offline demo\nHold START+SELECT to exit",
-                 true, KEY_A);
-
-    // Start the demo mode
-    config_defaults(&cfg);
-    cfg.demo = true;
-    snprintf(cfg.title, sizeof(cfg.title), "Demo house");
-    return true;
+    return false;
 }
 
 // WiFi
@@ -265,104 +279,667 @@ static bool find_ap(const char *ssid, Wifi_AccessPoint *out)
     return false;
 }
 
+// Waits until the connection started by Wifi_Connect*() succeeds or fails
+static bool wait_for_connection(const char *network)
+{
+    char body[256];
+    int last = -1;
+    int status = ASSOCSTATUS_DISCONNECTED;
+
+    for (int frame = 0; frame < 60 * 30; frame++)
+    {
+        status = Wifi_AssocStatus();
+        if (status != last)
+        {
+            last = status;
+            snprintf(body, sizeof(body), "Network: %s\n\nStatus: %s", network,
+                     assoc_status_text(status));
+            app_show_message(&app, "Connecting to WiFi", body,
+                             "Hold START+SELECT to exit", false, true);
+        }
+        if (status == ASSOCSTATUS_ASSOCIATED
+            || status == ASSOCSTATUS_CANNOTCONNECT)
+            break;
+        wait_frame();
+        if (wants_exit())
+            exit(0);
+    }
+
+    if (status == ASSOCSTATUS_ASSOCIATED)
+    {
+        struct in_addr gw, mask, dns1, dns2;
+        struct in_addr ip = Wifi_GetIPInfo(&gw, &mask, &dns1, &dns2);
+        snprintf(app.ip, sizeof(app.ip), "%s", inet_ntoa(ip));
+        app.wifi_quality = 3;
+        return true;
+    }
+
+    Wifi_DisconnectAP();
+    app.wifi_quality = 0;
+    return false;
+}
+
+// One attempt with the network of config.ini, or the console settings
+static bool connect_configured_wifi(void)
+{
+    char body[256];
+    Wifi_EnableWifi();
+
+    if (cfg.wifi_ssid[0] == '\0')
+    {
+        show_status("Connecting to WiFi",
+                    "Using the WiFi connections saved in the console "
+                    "settings...");
+        Wifi_AutoConnect();
+        return wait_for_connection("saved in the console settings");
+    }
+
+    snprintf(body, sizeof(body), "Looking for network \"%s\"...",
+             cfg.wifi_ssid);
+    show_status("Connecting to WiFi", body);
+
+    Wifi_AccessPoint ap;
+    memset(&ap, 0, sizeof(ap));
+    if (!find_ap(cfg.wifi_ssid, &ap))
+    {
+        // It may be a hidden network: try with the name only
+        memset(&ap, 0, sizeof(ap));
+        snprintf(ap.ssid, sizeof(ap.ssid), "%s", cfg.wifi_ssid);
+        ap.ssid_len = (u8)strlen(ap.ssid);
+    }
+    else if (!(ap.flags & WFLAG_APDATA_COMPATIBLE))
+    {
+        return false;
+    }
+
+    Wifi_SetIP(0, 0, 0, 0, 0);
+    size_t len = strlen(cfg.wifi_password);
+    Wifi_ConnectSecureAP(&ap, len ? cfg.wifi_password : NULL, len);
+    return wait_for_connection(cfg.wifi_ssid);
+}
+
+// Connects with the configured network. Returns false if the user wants to
+// choose another network.
 static bool connect_wifi(void)
 {
     char body[256];
 
     while (1)
     {
-        Wifi_EnableWifi();
-
-        if (cfg.wifi_ssid[0] != '\0')
-        {
-            snprintf(body, sizeof(body), "Looking for network \"%s\"...",
-                     cfg.wifi_ssid);
-            show_status("Connecting to WiFi", body);
-
-            Wifi_AccessPoint ap;
-            memset(&ap, 0, sizeof(ap));
-            if (!find_ap(cfg.wifi_ssid, &ap))
-            {
-                // It may be a hidden network: try with the name only
-                memset(&ap, 0, sizeof(ap));
-                snprintf(ap.ssid, sizeof(ap.ssid), "%s", cfg.wifi_ssid);
-                ap.ssid_len = (u8)strlen(ap.ssid);
-            }
-            else if (!(ap.flags & WFLAG_APDATA_COMPATIBLE))
-            {
-                snprintf(body, sizeof(body),
-                         "\"%s\" uses %s, which this console doesn't "
-                         "support.\n\nA DS or DS Lite can only use open or "
-                         "WEP networks. WPA2 needs a DSi.",
-                         cfg.wifi_ssid,
-                         Wifi_ApSecurityTypeString(ap.security_type));
-                message_wait("Unsupported network", body, "A: retry", true,
-                             KEY_A);
-                continue;
-            }
-
-            Wifi_SetIP(0, 0, 0, 0, 0);
-            size_t len = strlen(cfg.wifi_password);
-            Wifi_ConnectSecureAP(&ap, len ? cfg.wifi_password : NULL, len);
-        }
-        else
-        {
-            show_status("Connecting to WiFi",
-                        "Using the WiFi connections saved in the console "
-                        "settings...");
-            Wifi_AutoConnect();
-        }
-
-        // Wait up to 30 seconds
-        int last = -1;
-        int status = ASSOCSTATUS_DISCONNECTED;
-        for (int frame = 0; frame < 60 * 30; frame++)
-        {
-            status = Wifi_AssocStatus();
-            if (status != last)
-            {
-                last = status;
-                snprintf(body, sizeof(body), "%s%s%s\n\nStatus: %s",
-                         cfg.wifi_ssid[0] ? "Network: " : "",
-                         cfg.wifi_ssid,
-                         cfg.wifi_ssid[0] ? "" : "Using the console settings",
-                         assoc_status_text(status));
-                app_show_message(&app, "Connecting to WiFi", body,
-                                 "Hold START+SELECT to exit", false, true);
-            }
-            if (status == ASSOCSTATUS_ASSOCIATED
-                || status == ASSOCSTATUS_CANNOTCONNECT)
-                break;
-            wait_frame();
-            if (wants_exit())
-                exit(0);
-        }
-
-        if (status == ASSOCSTATUS_ASSOCIATED)
-        {
-            struct in_addr gw, mask, dns1, dns2;
-            struct in_addr ip = Wifi_GetIPInfo(&gw, &mask, &dns1, &dns2);
-            snprintf(app.ip, sizeof(app.ip), "%s", inet_ntoa(ip));
-            app.wifi_quality = 3;
+        if (connect_configured_wifi())
             return true;
-        }
-
-        Wifi_DisconnectAP();
-        app.wifi_quality = 0;
 
         int num_wfc = Wifi_GetData(WIFIGETDATA_NUMWFCAPS, 0, NULL);
         if (cfg.wifi_ssid[0] == '\0' && num_wfc <= 0)
             snprintf(body, sizeof(body),
                      "No WiFi connections are saved in this console.\n\n"
-                     "Add wifi_ssid and wifi_password to config.ini, or set "
-                     "up a connection in the WiFi settings of a game.");
+                     "Press X to choose your network.");
         else
             snprintf(body, sizeof(body),
                      "Check that the network is in range and that the "
                      "password is right.\n\n"
                      "A DS or DS Lite can only use open or WEP networks. "
                      "WPA2 needs a DSi (in DSi mode).");
-        message_wait("Can't connect to WiFi", body, "A: retry", true, KEY_A);
+        uint32_t k = message_wait("Can't connect to WiFi", body,
+                                  "A: retry   X: choose another network",
+                                  true, KEY_A | KEY_X);
+        if (k & KEY_X)
+            return false; // The caller runs the WiFi picker
+    }
+}
+
+// Setup wizard
+// ------------
+
+typedef enum {
+    HA_CONNECTED,
+    HA_WIFI_LOST,
+    HA_RUN_SETUP, // Sign in again / choose another server
+} ha_status;
+
+static ha_status connect_ha(void);
+
+// Shows app.kbd until the user presses OK (true) or goes back (false)
+static bool run_keyboard(void)
+{
+    app_show_keyboard(&app);
+    while (!app.kbd.done && !app.kbd.cancelled)
+    {
+        wait_frame();
+        if (wants_exit())
+            exit(0);
+    }
+    return app.kbd.done;
+}
+
+static const char *security_text(const Wifi_AccessPoint *ap)
+{
+    if (!(ap->flags & WFLAG_APDATA_COMPATIBLE))
+        return ap->security_type == AP_SECURITY_OPEN
+                   ? "not supported"
+                   : "WPA - needs a DSi, not supported here";
+    switch (ap->security_type)
+    {
+        case AP_SECURITY_OPEN: return "Open";
+        case AP_SECURITY_WEP: return "WEP";
+        default: return "WPA2";
+    }
+}
+
+// Lets the user choose a network and type its password. Returns when the
+// console is connected.
+static void wifi_setup(void)
+{
+    static Wifi_AccessPoint aps[PICKER_MAX_ITEMS];
+    static char password[65];
+    char body[256];
+
+    while (1)
+    {
+        Wifi_EnableWifi();
+        Wifi_ScanMode();
+
+        picker_init(&app.picker, "Choose your WiFi network",
+                    "Tap your network. Networks saved in the console "
+                    "connect without a password.\n\n"
+                    "A DS or DS Lite can only use open and WEP networks. "
+                    "WPA2 needs a DSi.");
+        snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
+                 "Searching for networks...");
+        picker_set_actions(&app.picker, "Search again", "Hidden network");
+        app_show_picker(&app);
+
+        uint32_t frame = 0;
+        while (!picker_finished(&app.picker))
+        {
+            // Update the list once per second
+            if ((frame++ % 60) == 30)
+            {
+                int count = Wifi_GetNumAP();
+                int n = 0;
+                for (int i = 0; i < count && n < PICKER_MAX_ITEMS; i++)
+                {
+                    Wifi_AccessPoint ap;
+                    if (Wifi_GetAPData(i, &ap) != WIFI_RETURN_OK
+                        || ap.ssid[0] == '\0')
+                        continue;
+                    bool dup = false;
+                    for (int j = 0; j < n; j++)
+                        dup |= strcmp(aps[j].ssid, ap.ssid) == 0;
+                    if (!dup)
+                        aps[n++] = ap;
+                }
+
+                int selected = app.picker.selected;
+                int scroll = app.picker.scroll;
+                app.picker.count = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    char detail[48];
+                    snprintf(detail, sizeof(detail), "%s%s",
+                             security_text(&aps[i]),
+                             (aps[i].flags & WFLAG_APDATA_CONFIG_IN_WFC)
+                                 ? "  |  saved" : "");
+                    picker_add(&app.picker, aps[i].ssid, detail);
+                }
+                app.picker.selected = selected < n ? selected : 0;
+                app.picker.scroll = scroll;
+                app.dirty = true;
+            }
+            wait_frame();
+            if (wants_exit())
+                exit(0);
+        }
+
+        if (app.picker.action == 0)
+            continue; // Search again
+
+        Wifi_AccessPoint ap;
+        bool use_wfc = false;
+        bool ask_password = true;
+
+        if (app.picker.action == 1)
+        {
+            kbd_init(&app.kbd, "Network name", "", 32, KBD_TEXT, false, true);
+            snprintf(app.kbd.hint, sizeof(app.kbd.hint),
+                     "Type the name (SSID) of the hidden network. Upper and "
+                     "lower case matter.");
+            if (!run_keyboard() || app.kbd.text[0] == '\0')
+                continue;
+            memset(&ap, 0, sizeof(ap));
+            snprintf(ap.ssid, sizeof(ap.ssid), "%s", app.kbd.text);
+            ap.ssid_len = (u8)strlen(ap.ssid);
+        }
+        else
+        {
+            ap = aps[app.picker.chosen];
+            if (!(ap.flags & WFLAG_APDATA_COMPATIBLE))
+            {
+                snprintf(body, sizeof(body),
+                         "\"%s\" uses WPA/WPA2 security, which the DS and "
+                         "DS Lite can't use.\n\n"
+                         "Use a DSi, or create an open or WEP guest network "
+                         "for the DS in your router.", ap.ssid);
+                message_wait("Network not supported", body, "A: back", true,
+                             KEY_A);
+                continue;
+            }
+            use_wfc = ap.flags & WFLAG_APDATA_CONFIG_IN_WFC;
+            ask_password = !use_wfc && ap.security_type != AP_SECURITY_OPEN;
+        }
+
+        password[0] = '\0';
+        if (ask_password)
+        {
+            char title[48];
+            snprintf(title, sizeof(title), "Password for \"%.20s\"",
+                     ap.ssid);
+            kbd_init(&app.kbd, title, "", 64, KBD_TEXT, true, true);
+            snprintf(app.kbd.hint, sizeof(app.kbd.hint),
+                     "Type the WiFi password%s. Press Y to show it.",
+                     app.picker.action == 1 ? " (empty if it's open)" : "");
+            if (!run_keyboard())
+                continue;
+            snprintf(password, sizeof(password), "%s", app.kbd.text);
+        }
+
+        Wifi_SetIP(0, 0, 0, 0, 0);
+        if (use_wfc)
+        {
+            Wifi_ConnectWfcAP(&ap);
+        }
+        else
+        {
+            size_t len = strlen(password);
+            Wifi_ConnectSecureAP(&ap, len ? password : NULL, len);
+        }
+
+        if (wait_for_connection(ap.ssid))
+        {
+            // Remember the network unless the console already knows it
+            if (use_wfc)
+            {
+                cfg.wifi_ssid[0] = '\0';
+                cfg.wifi_password[0] = '\0';
+            }
+            else
+            {
+                snprintf(cfg.wifi_ssid, sizeof(cfg.wifi_ssid), "%s", ap.ssid);
+                snprintf(cfg.wifi_password, sizeof(cfg.wifi_password), "%s",
+                         password);
+            }
+            return;
+        }
+
+        snprintf(body, sizeof(body),
+                 "Couldn't connect to \"%s\".\n\n"
+                 "Check the password (upper and lower case matter).",
+                 ap.ssid);
+        message_wait("Can't connect", body, "A: try again", true, KEY_A);
+    }
+}
+
+// Finds Home Assistant on the network, or lets the user type its address.
+// The result is "host:port".
+static void find_server(char *server, size_t server_len)
+{
+    static discovery d;
+    char body[256];
+
+    while (1)
+    {
+        struct in_addr gw, mask, dns1, dns2;
+        struct in_addr ip = Wifi_GetIPInfo(&gw, &mask, &dns1, &dns2);
+        discovery_start(&d, ntohl(ip.s_addr), 8123);
+
+        picker_init(&app.picker, "Looking for Home Assistant",
+                    "Searching your network, this takes up to 20 seconds. "
+                    "Tap your server as soon as it shows up.");
+        snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
+                 "Searching...");
+        app.picker.progress = 0;
+        picker_set_actions(&app.picker, "Type the address", "");
+        app_show_picker(&app);
+
+        int shown = 0;
+        bool finished = false;
+        while (!picker_finished(&app.picker))
+        {
+            if (!finished && !discovery_step(&d))
+            {
+                finished = true;
+                if (d.num_found > 0)
+                {
+                    snprintf(app.picker.title, sizeof(app.picker.title),
+                             "Found Home Assistant!");
+                    snprintf(app.picker.hint, sizeof(app.picker.hint),
+                             "Tap your server.");
+                }
+                else
+                {
+                    snprintf(app.picker.title, sizeof(app.picker.title),
+                             "Home Assistant not found");
+                    snprintf(app.picker.hint, sizeof(app.picker.hint),
+                             "Make sure Home Assistant is on the same network "
+                             "as the DS (guest networks are often isolated).\n"
+                             "\nYou can also type its address. You can see it "
+                             "in Home Assistant: Settings > System > Network.");
+                    snprintf(app.picker.empty_text,
+                             sizeof(app.picker.empty_text), " ");
+                }
+                picker_set_actions(&app.picker, "Type the address",
+                                   "Search again");
+                app.dirty = true;
+            }
+
+            int progress = d.total ? d.scanned * 100 / d.total : 0;
+            if (progress != app.picker.progress)
+            {
+                app.picker.progress = progress;
+                app.dirty = true;
+            }
+            while (shown < d.num_found)
+            {
+                char detail[48];
+                struct in_addr a;
+                a.s_addr = htonl(d.found[shown].ip);
+                snprintf(detail, sizeof(detail), "%s:%d", inet_ntoa(a),
+                         d.found[shown].port);
+                picker_add(&app.picker, d.found[shown].host, detail);
+                shown++;
+                app.dirty = true;
+            }
+
+            wait_frame();
+            if (wants_exit())
+                exit(0);
+        }
+        discovery_stop(&d);
+
+        if (app.picker.chosen >= 0)
+        {
+            ha_found *f = &d.found[app.picker.chosen];
+            snprintf(server, server_len, "%s:%d", f->host, f->port);
+            return;
+        }
+        if (app.picker.action == 1)
+            continue; // Search again
+
+        // Type the address. Start with the first part of the DS's IP.
+        char prefix[32];
+        snprintf(prefix, sizeof(prefix), "%s", inet_ntoa(ip));
+        char *dot = strrchr(prefix, '.');
+        if (dot)
+            dot[1] = '\0';
+
+        kbd_init(&app.kbd, "Home Assistant address", prefix, 40, KBD_NUMERIC,
+                 false, true);
+        snprintf(app.kbd.hint, sizeof(app.kbd.hint),
+                 "Type the IP address of Home Assistant, like 192.168.1.10. "
+                 "Add :port at the end if it isn't 8123.");
+        if (!run_keyboard())
+            continue;
+
+        char host[128];
+        int port;
+        setup_parse_server(app.kbd.text, host, sizeof(host), &port);
+        snprintf(body, sizeof(body), "Checking %s:%d...", host, port);
+        show_status("Looking for Home Assistant", body);
+
+        static http_client c;
+        http_client_init(&c, host, port);
+        c.timeout_ms = 4000;
+        bool ok = auth_probe(&c);
+        http_client_close(&c);
+        if (ok)
+        {
+            snprintf(server, server_len, "%s:%d", host, port);
+            return;
+        }
+
+        snprintf(body, sizeof(body),
+                 "There's no Home Assistant at %s:%d.\n\n"
+                 "Check the address. HTTPS isn't supported, the DS needs the "
+                 "local http:// address.", host, port);
+        message_wait("Not found", body, "A: try again", true, KEY_A);
+    }
+}
+
+// Signs in, on the phone (web page served by the DS) or with the keyboard.
+// Returns false if the user wants to choose another server.
+static bool sign_in(const char *server)
+{
+    static setup_server srv;
+    static char user[96];
+    static char password[128];
+    char url[48], body[256];
+
+    bool web = setup_server_start(&srv, 80, server);
+    snprintf(url, sizeof(url), "http://%s", app.ip);
+
+    while (1)
+    {
+        picker_init(&app.picker, "Sign in to Home Assistant",
+                    web ? "On your phone or computer (on the same WiFi), "
+                          "open the address above and sign in with your "
+                          "Home Assistant user.\n\n"
+                          "Or tap \"Type on the DS\"."
+                        : "Sign in with your Home Assistant user name and "
+                          "password.");
+        if (web)
+        {
+            snprintf(app.picker.big_text, sizeof(app.picker.big_text), "%s",
+                     url);
+            snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
+                     "Waiting for you to sign in on your phone...");
+        }
+        else
+        {
+            app.picker.empty_text[0] = '\0';
+        }
+        picker_set_actions(&app.picker, "Type on the DS", "Back");
+        app_show_picker(&app);
+
+        while (!picker_finished(&app.picker))
+        {
+            if (web && setup_server_poll(&srv) == SETUP_SUBMITTED)
+            {
+                snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
+                         "Signing in...");
+                app.dirty = true;
+                present();
+
+                setup_process(&srv, &cfg);
+                if (srv.state == SETUP_STATE_DONE)
+                {
+                    // Let the phone load the "All set!" page
+                    for (int i = 0; i < 90; i++)
+                    {
+                        setup_server_poll(&srv);
+                        wait_frame();
+                    }
+                    setup_server_stop(&srv);
+                    return true;
+                }
+                snprintf(app.picker.empty_text, sizeof(app.picker.empty_text),
+                         "%s", srv.state == SETUP_STATE_MFA
+                                   ? "Enter the two-factor code on your phone."
+                                   : srv.status);
+                app.dirty = true;
+            }
+            wait_frame();
+            if (wants_exit())
+                exit(0);
+        }
+
+        if (app.picker.action == 1)
+        {
+            setup_server_stop(&srv);
+            return false;
+        }
+
+        // Sign in with the keyboard
+        kbd_init(&app.kbd, "User name", user, 60, KBD_TEXT, false, true);
+        snprintf(app.kbd.hint, sizeof(app.kbd.hint),
+                 "Your Home Assistant user name (not the display name). It "
+                 "is usually lowercase.");
+        if (!run_keyboard())
+            continue;
+        snprintf(user, sizeof(user), "%s", app.kbd.text);
+
+        kbd_init(&app.kbd, "Password", "", 120, KBD_TEXT, true, true);
+        snprintf(app.kbd.hint, sizeof(app.kbd.hint),
+                 "Your Home Assistant password. Press Y to show it. It isn't "
+                 "stored on the DS.");
+        if (!run_keyboard())
+            continue;
+        snprintf(password, sizeof(password), "%s", app.kbd.text);
+        memset(app.kbd.text, 0, sizeof(app.kbd.text));
+
+        show_status("Signing in...", server);
+        srv.state = SETUP_STATE_WAITING;
+        login_result r = setup_sign_in(&srv, &cfg, server, user, password,
+                                       NULL);
+        memset(password, 0, sizeof(password));
+
+        while (r == LOGIN_NEED_MFA)
+        {
+            kbd_init(&app.kbd, "Two-factor code", "", 8, KBD_NUMERIC, false,
+                     true);
+            snprintf(app.kbd.hint, sizeof(app.kbd.hint), "%s",
+                     srv.status_error ? srv.status
+                                      : "Enter the code from your "
+                                        "authenticator app.");
+            if (!run_keyboard())
+                break;
+            show_status("Signing in...", "Checking the code...");
+            r = setup_sign_in_mfa(&srv, &cfg, app.kbd.text);
+        }
+
+        if (r == LOGIN_OK)
+        {
+            setup_server_stop(&srv);
+            return true;
+        }
+        if (r == LOGIN_NEED_MFA)
+            continue; // Went back from the code screen
+
+        srv.state = SETUP_STATE_WAITING;
+        snprintf(body, sizeof(body), "%s", srv.status);
+        message_wait("Couldn't sign in", body, "A: try again", true, KEY_A);
+    }
+}
+
+// The whole setup: WiFi (if needed), server, sign in, save
+static void run_setup(bool wifi_connected)
+{
+    char server[160];
+    char body[320];
+
+    // The network scan needs almost all the sockets of lwIP
+    http_client_close(&ha.http);
+
+    if (!wifi_connected)
+    {
+        // Try the WiFi settings of the console first: often nothing else
+        // is needed.
+        int num_wfc = Wifi_GetData(WIFIGETDATA_NUMWFCAPS, 0, NULL);
+        if (!((cfg.wifi_ssid[0] || num_wfc > 0) && connect_configured_wifi()))
+            wifi_setup();
+    }
+
+    // If the server is known (signed out, for example) suggest it first
+    while (1)
+    {
+        if (ha.signed_out && cfg.host[0] != '\0')
+        {
+            snprintf(server, sizeof(server), "%s:%d", cfg.host, cfg.port);
+            ha.signed_out = false;
+        }
+        else
+        {
+            find_server(server, sizeof(server));
+        }
+        if (sign_in(server))
+            break;
+    }
+
+    cfg.demo = false;
+    if (save_config())
+        snprintf(body, sizeof(body),
+                 "DSHA is connected to Home Assistant.\n\n"
+                 "Your settings were saved in %s, so next time it connects "
+                 "by itself.\n\n"
+                 "Tip: press X in the dashboard for help and to run this "
+                 "setup again.", config_path);
+    else
+        snprintf(body, sizeof(body),
+                 "DSHA is connected to Home Assistant.\n\n"
+                 "The settings couldn't be saved to the SD card, so you'll "
+                 "need to sign in again next time.");
+    message_wait("All set!", body, "A: open the dashboard", false, KEY_A);
+
+    ha_init(&ha, &cfg);
+}
+
+static void run_demo(void)
+{
+    config_defaults(&cfg);
+    cfg.demo = true;
+    snprintf(cfg.title, sizeof(cfg.title), "Demo house");
+    snprintf(app.ip, sizeof(app.ip), "offline demo");
+    ha_init(&ha, &cfg);
+    connect_ha();
+    while (1)
+    {
+        wait_frame();
+        if (wants_exit())
+            exit(0);
+        if (app.request_reload)
+        {
+            app.request_reload = false;
+            connect_ha();
+        }
+        if (app.request_setup)
+        {
+            app.request_setup = false;
+            app.info_visible = false;
+            return; // Back to the welcome screen
+        }
+    }
+}
+
+// First screen when there is no config file
+static bool welcome(config_status status)
+{
+    while (1)
+    {
+        picker_init(&app.picker, "Welcome to DSHA!",
+                    "Control your Home Assistant from this DS.\n\n"
+                    "The setup connects to WiFi, finds Home Assistant and "
+                    "signs you in. It takes about a minute.");
+        if (status == CONFIG_INVALID)
+            snprintf(app.picker.hint, sizeof(app.picker.hint),
+                     "There's a problem with your config file:\n%s\n\n"
+                     "Start the setup to create a new one.", config_error);
+        else if (!fat_ok)
+            strncat(app.picker.hint,
+                    "\n\n(The SD card can't be accessed, so the settings "
+                    "won't be saved.)",
+                    sizeof(app.picker.hint) - strlen(app.picker.hint) - 1);
+        app.picker.empty_text[0] = '\0';
+        picker_set_actions(&app.picker, "Start setup", "Try the demo");
+        app_show_picker(&app);
+
+        while (!picker_finished(&app.picker))
+        {
+            wait_frame();
+            if (wants_exit())
+                exit(0);
+        }
+        if (app.picker.action == 0)
+            return true;
+        run_demo();
     }
 }
 
@@ -394,7 +971,7 @@ static void load_progress(void *user, int done, int total)
     present();
 }
 
-static bool connect_ha(void)
+static ha_status connect_ha(void)
 {
     char body[384];
 
@@ -417,15 +994,22 @@ static bool connect_ha(void)
                          ha.skipped, ENTITY_MAX);
                 app_toast(&app, body, false);
             }
-            return true;
+            return HA_CONNECTED;
         }
+
+        if (cfg.demo)
+            return HA_CONNECTED; // Can't fail
 
         // Is the WiFi connection still there?
         if (Wifi_AssocStatus() != ASSOCSTATUS_ASSOCIATED)
         {
             Wifi_DisconnectAP();
-            return false;
+            return HA_WIFI_LOST;
         }
+
+        // The session was deleted in Home Assistant: just sign in again
+        if (ha.signed_out)
+            return HA_RUN_SETUP;
 
         snprintf(body, sizeof(body),
                  "%s\n\nServer: %s:%d\n\n"
@@ -433,8 +1017,11 @@ static bool connect_ha(void)
                  "homeassistant.local. HTTPS isn't supported: use the local "
                  "http:// address.",
                  ha.error, cfg.host, cfg.port);
-        message_wait("Can't load Home Assistant", body, "A: retry", true,
-                     KEY_A);
+        uint32_t k = message_wait("Can't load Home Assistant", body,
+                                  "A: retry   X: set up again", true,
+                                  KEY_A | KEY_X);
+        if (k & KEY_X)
+            return HA_RUN_SETUP;
     }
 }
 
@@ -473,25 +1060,15 @@ int main(int argc, char *argv[])
     fat_ok = fatInitDefault();
     nitro_ok = nitroFSInit(NULL);
 
-    load_config();
-    ha_init(&ha, &cfg);
+    config_status status = load_config();
+    bool need_setup = status != CONFIG_LOADED;
 
-    if (cfg.demo)
+    if (status == CONFIG_LOADED && cfg.demo)
+        run_demo(); // Returns if the user asks for the setup
+    if (need_setup || cfg.demo)
     {
-        // No network at all: everything is simulated
-        snprintf(app.ip, sizeof(app.ip), "offline demo");
-        connect_ha();
-        while (1)
-        {
-            wait_frame();
-            if (wants_exit())
-                return 0;
-            if (app.request_reload)
-            {
-                app.request_reload = false;
-                connect_ha();
-            }
-        }
+        welcome(status);
+        need_setup = true;
     }
 
     show_status("Starting WiFi", "Initializing the WiFi hardware...");
@@ -503,12 +1080,27 @@ int main(int argc, char *argv[])
         return 0;
     }
 
+    if (need_setup)
+        run_setup(false);
+    else
+        ha_init(&ha, &cfg);
+
     while (1)
     {
-        if (!connect_wifi())
+        if (Wifi_AssocStatus() != ASSOCSTATUS_ASSOCIATED && !connect_wifi())
+        {
+            wifi_setup();
+            save_config();
+        }
+
+        ha_status hs = connect_ha();
+        if (hs == HA_WIFI_LOST)
             continue;
-        if (!connect_ha())
-            continue; // The WiFi connection was lost
+        if (hs == HA_RUN_SETUP)
+        {
+            run_setup(true);
+            continue;
+        }
 
         // Main loop
         uint32_t frames = 0;
@@ -528,12 +1120,36 @@ int main(int argc, char *argv[])
                 break; // Reconnect
             }
 
+            // Signed out while using the app (session deleted in HA)
+            if (ha.signed_out)
+            {
+                message_wait("Signed out",
+                             "Home Assistant ended the session of this DS "
+                             "(it was deleted in your profile, or not used "
+                             "for 90 days).\n\nPlease sign in again.",
+                             "A: sign in", true, KEY_A);
+                run_setup(true);
+                break;
+            }
+
+            if (app.request_setup)
+            {
+                app.request_setup = false;
+                app.info_visible = false;
+                http_client_close(&ha.http);
+                run_setup(true);
+                break;
+            }
+
             if (app.request_reload)
             {
                 app.request_reload = false;
-                if (!connect_ha())
+                hs = connect_ha();
+                if (hs == HA_WIFI_LOST)
+                    break;
+                if (hs == HA_RUN_SETUP)
                 {
-                    Wifi_DisconnectAP();
+                    run_setup(true);
                     break;
                 }
             }

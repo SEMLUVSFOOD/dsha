@@ -9,18 +9,23 @@
 #
 #     python3 tests/fake_ha.py --bind 0.0.0.0 --port 8123
 #
-# Then use "token=testtoken" in config.ini.
+# Then use "token=testtoken" in config.ini, or sign in with user "sam" and
+# password "secret" (user "mfa" also asks for the two-factor code 123456).
 
 import argparse
 import copy
 import json
 import os
 import sys
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOKEN = "testtoken"
+# Users for the login flow. "mfa" also needs the two-factor code 123456.
+USERS = {"sam": "secret", "mfa": "secret"}
+MFA_CODE = "123456"
 
 
 class State:
@@ -93,6 +98,28 @@ class State:
             return [copy.deepcopy(s)]
 
 
+class Auth:
+    """Login flow and tokens, like homeassistant/components/auth."""
+
+    def __init__(self):
+        self.flows = {}     # flow_id -> {"client_id", "step", "user"}
+        self.codes = {}     # authorization code -> (client_id, user)
+        self.refresh = {}   # refresh token -> client_id
+        self.access = set()
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def same_origin(a, b):
+        from urllib.parse import urlparse
+        pa, pb = urlparse(a), urlparse(b)
+        return pa.scheme == pb.scheme and pa.netloc == pb.netloc
+
+    def new_access(self):
+        tok = "acc-" + secrets.token_hex(40)
+        self.access.add(tok)
+        return tok
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "FakeHA/1.0"
@@ -128,7 +155,10 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def authorized(self):
-        if self.headers.get("Authorization") == "Bearer " + TOKEN:
+        auth = self.headers.get("Authorization", "")
+        if auth == "Bearer " + TOKEN:
+            return True
+        if auth.startswith("Bearer ") and auth[7:] in self.server.auth.access:
             return True
         body = b"401: Unauthorized"
         self.send_response(401)
@@ -139,6 +169,11 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
+        if self.path == "/auth/providers":
+            self.send_json(200, {"providers": [
+                {"name": "Home Assistant Local", "id": None,
+                 "type": "homeassistant"}], "preselect_remember_me": False})
+            return
         if not self.authorized():
             return
         if self.path == "/api/":
@@ -154,9 +189,115 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_json(404, {"message": "Not found"})
 
+    def auth_post(self, raw):
+        auth = self.server.auth
+        if self.path == "/auth/login_flow":
+            data = json.loads(raw)
+            if (not data.get("client_id") or not data.get("redirect_uri")
+                    or not isinstance(data.get("handler"), list)):
+                self.send_json(400, {"message": "Invalid data"})
+                return
+            if not Auth.same_origin(data["client_id"], data["redirect_uri"]):
+                self.send_json(403, {"message": "Invalid redirect URI"})
+                return
+            flow_id = secrets.token_hex(16)
+            with auth.lock:
+                auth.flows[flow_id] = {"client_id": data["client_id"],
+                                       "step": "init", "user": None}
+            self.send_json(200, {"type": "form", "flow_id": flow_id,
+                                 "handler": data["handler"],
+                                 "step_id": "init", "data_schema": [],
+                                 "errors": {}})
+            return
+
+        if self.path.startswith("/auth/login_flow/"):
+            data = json.loads(raw)
+            flow_id = self.path.rsplit("/", 1)[1]
+            with auth.lock:
+                flow = auth.flows.get(flow_id)
+            if flow is None:
+                self.send_json(404, {"message": "Invalid flow specified"})
+                return
+            if data.get("client_id") != flow["client_id"]:
+                self.send_json(400, {"message": "Invalid client id"})
+                return
+            base = {"flow_id": flow_id, "handler": ["homeassistant", None],
+                    "data_schema": []}
+            if flow["step"] == "init":
+                user = data.get("username")
+                if USERS.get(user) != data.get("password"):
+                    self.send_json(200, dict(base, type="form", step_id="init",
+                                             errors={"base": "invalid_auth"}))
+                    return
+                flow["user"] = user
+                if user == "mfa":
+                    flow["step"] = "mfa"
+                    self.send_json(200, dict(base, type="form", step_id="mfa",
+                                             errors={}))
+                    return
+            elif flow["step"] == "mfa":
+                if data.get("code") != MFA_CODE:
+                    self.send_json(200, dict(base, type="form", step_id="mfa",
+                                             errors={"base": "invalid_code"}))
+                    return
+            code = secrets.token_hex(16)
+            with auth.lock:
+                auth.codes[code] = (flow["client_id"], flow["user"])
+                del auth.flows[flow_id]
+            self.send_json(200, dict(base, type="create_entry", version=1,
+                                     result=code, title=flow["user"]))
+            return
+
+        if self.path == "/auth/token":
+            from urllib.parse import parse_qs
+            form = {k: v[0] for k, v in parse_qs(raw.decode()).items()}
+            grant = form.get("grant_type")
+            with auth.lock:
+                if grant == "authorization_code":
+                    entry = auth.codes.pop(form.get("code"), None)
+                    if entry is None or entry[0] != form.get("client_id"):
+                        self.send_json(400, {"error": "invalid_request",
+                                             "error_description": "Invalid code"})
+                        return
+                    refresh = "ref-" + secrets.token_hex(32)
+                    auth.refresh[refresh] = entry[0]
+                    self.send_json(200, {"access_token": auth.new_access(),
+                                         "expires_in": 1800,
+                                         "refresh_token": refresh,
+                                         "token_type": "Bearer"})
+                    return
+                if grant == "refresh_token":
+                    client = auth.refresh.get(form.get("refresh_token"))
+                    if client is None or client != form.get("client_id"):
+                        self.send_json(400, {"error": "invalid_grant"})
+                        return
+                    self.send_json(200, {"access_token": auth.new_access(),
+                                         "expires_in": 1800,
+                                         "token_type": "Bearer"})
+                    return
+            self.send_json(400, {"error": "unsupported_grant_type"})
+            return
+
+        # Test hooks
+        if self.path == "/test/expire_access_tokens":
+            with auth.lock:
+                auth.access.clear()
+            self.send_json(200, {})
+            return
+        if self.path == "/test/revoke_refresh_tokens":
+            with auth.lock:
+                auth.refresh.clear()
+                auth.access.clear()
+            self.send_json(200, {})
+            return
+        self.send_json(404, {"message": "Not found"})
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
+        if self.path.startswith("/auth/") or self.path.startswith("/test/"):
+            self.auth_post(raw)
+            return
         if not self.authorized():
             return
         parts = self.path.split("/")
@@ -178,6 +319,7 @@ class Handler(BaseHTTPRequestHandler):
 def make_server(bind, port, mode="length", quiet=True, fixture=None):
     httpd = ThreadingHTTPServer((bind, port), Handler)
     httpd.state = State(fixture or os.path.join(HERE, "fixtures", "states.json"))
+    httpd.auth = Auth()
     httpd.mode = mode
     httpd.quiet = quiet
     httpd.daemon_threads = True

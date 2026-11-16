@@ -142,6 +142,8 @@ bool config_parse(ha_config *cfg, const char *text, char *err, size_t errlen)
             cfg->port = atoi(value);
         else if (strcmp(key, "token") == 0)
             copy_str(cfg->token, sizeof(cfg->token), value);
+        else if (strcmp(key, "refresh_token") == 0)
+            copy_str(cfg->refresh_token, sizeof(cfg->refresh_token), value);
         else if (strcmp(key, "wifi_ssid") == 0 || strcmp(key, "ssid") == 0)
             copy_str(cfg->wifi_ssid, sizeof(cfg->wifi_ssid), value);
         else if (strcmp(key, "wifi_password") == 0
@@ -179,7 +181,7 @@ bool config_parse(ha_config *cfg, const char *text, char *err, size_t errlen)
         snprintf(err, errlen, "Missing 'host' in config file");
         return false;
     }
-    if (cfg->token[0] == '\0')
+    if (cfg->token[0] == '\0' && cfg->refresh_token[0] == '\0')
     {
         snprintf(err, errlen, "Missing 'token' in config file");
         return false;
@@ -204,6 +206,66 @@ bool config_load_file(ha_config *cfg, const char *path, char *err,
     fclose(f);
 
     return config_parse(cfg, buf, err, errlen);
+}
+
+size_t config_write(const ha_config *cfg, char *out, size_t out_len)
+{
+    size_t len = 0;
+
+#define PUT(...)                                                        \
+    do {                                                                \
+        if (len < out_len)                                              \
+        {                                                               \
+            int n_ = snprintf(out + len, out_len - len, __VA_ARGS__);   \
+            if (n_ > 0)                                                 \
+                len += (size_t)n_;                                      \
+        }                                                               \
+    } while (0)
+
+    PUT("# DSHA configuration, written by the setup wizard.\n"
+        "# You can edit it, see config.example.ini for all the options.\n"
+        "# Delete this file to run the setup wizard again.\n\n");
+    if (cfg->demo)
+        PUT("demo = 1\n");
+    if (cfg->host[0])
+        PUT("host = %s\nport = %d\n", cfg->host, cfg->port);
+    if (cfg->token[0])
+        PUT("token = %s\n", cfg->token);
+    if (cfg->refresh_token[0])
+        PUT("# Session created by signing in on the DS. You can revoke it in\n"
+            "# your Home Assistant profile (Security > Refresh tokens).\n"
+            "refresh_token = %s\n", cfg->refresh_token);
+    if (cfg->wifi_ssid[0])
+        PUT("\nwifi_ssid = %s\nwifi_password = %s\n", cfg->wifi_ssid,
+            cfg->wifi_password);
+    PUT("\ntitle = %s\nrefresh_seconds = %d\n", cfg->title,
+        cfg->refresh_seconds);
+    if (cfg->domains[0])
+        PUT("domains = %s\n", cfg->domains);
+    if (cfg->num_entities > 0)
+        PUT("\n");
+    for (int i = 0; i < cfg->num_entities; i++)
+        PUT("entity = %s\n", cfg->entities[i]);
+
+#undef PUT
+
+    if (len >= out_len)
+        len = out_len - 1;
+    return len;
+}
+
+bool config_save_file(const ha_config *cfg, const char *path)
+{
+    static char buf[16 * 1024];
+    size_t len = config_write(cfg, buf, sizeof(buf));
+
+    FILE *f = fopen(path, "wb");
+    if (f == NULL)
+        return false;
+    bool ok = fwrite(buf, 1, len, f) == len;
+    if (fclose(f) != 0)
+        ok = false;
+    return ok;
 }
 
 bool config_domain_allowed(const ha_config *cfg, const char *entity_id)

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "auth.h"
 #include "config.h"
 #include "ha.h"
 #include "platform.h"
@@ -30,7 +31,7 @@ static ha_entity *find(const char *id)
 static void setup(const char *host, int port, const char *token,
                   const char *extra)
 {
-    char text[512], err[128];
+    char text[1024], err[128];
     snprintf(text, sizeof(text), "host=%s\nport=%d\ntoken=%s\n%s", host, port,
              token, extra);
     config_defaults(&cfg);
@@ -123,6 +124,62 @@ int main(int argc, char *argv[])
     CHECK(ha_action(&ha, &ha.entities[0], ACT_PRIMARY));
     CHECK(strcmp(ha.entities[0].state, "locked") == 0);
     http_client_close(&ha.http);
+
+    // Sign in with user name and password
+    // -----------------------------------
+    {
+        static http_client hc;
+        static ha_login login;
+        http_client_init(&hc, host, port);
+        hc.timeout_ms = 3000;
+
+        CHECK(auth_probe(&hc));
+
+        CHECK(auth_login(&hc, &login, "sam", "wrong") == LOGIN_INVALID);
+        CHECK(strstr(login.error, "password") != NULL);
+
+        CHECK(auth_login(&hc, &login, "sam", "secret") == LOGIN_OK);
+        CHECK(strncmp(login.refresh_token, "ref-", 4) == 0);
+        CHECK(strncmp(login.access_token, "acc-", 4) == 0);
+
+        // Two-factor authentication
+        static ha_login login2;
+        CHECK(auth_login(&hc, &login2, "mfa", "secret") == LOGIN_NEED_MFA);
+        CHECK(auth_login_mfa(&hc, &login2, "000000") == LOGIN_NEED_MFA);
+        CHECK(strstr(login2.error, "code") != NULL);
+        CHECK(auth_login_mfa(&hc, &login2, "123456") == LOGIN_OK);
+        CHECK(login2.refresh_token[0] != '\0');
+
+        // Use the refresh token as the only credential
+        char extra[600];
+        snprintf(extra, sizeof(extra), "refresh_token=%s\n",
+                 login.refresh_token);
+        setup(host, port, "", extra);
+        CHECK(ha.refresh_token[0] != '\0');
+        CHECK(ha_check(&ha));
+        CHECK(ha_load_all(&ha, &cfg, NULL, NULL));
+        CHECK(ha.count == 22);
+
+        // Access tokens expire: DSHA must get a new one transparently
+        http_result r;
+        CHECK(http_request(&hc, "POST", "/test/expire_access_tokens", NULL,
+                           "{}", NULL, NULL, &r) && r.status == 200);
+        ha_entity *sw = find("switch.coffee_machine");
+        CHECK(ha_refresh(&ha, sw));
+        CHECK(ha_action(&ha, sw, ACT_PRIMARY));
+        CHECK(ha_action(&ha, sw, ACT_PRIMARY));
+
+        // The session is deleted in Home Assistant: clear error message
+        CHECK(http_request(&hc, "POST", "/test/revoke_refresh_tokens", NULL,
+                           "{}", NULL, NULL, &r) && r.status == 200);
+        CHECK(!ha_refresh(&ha, sw));
+        CHECK(ha.signed_out);
+        CHECK(strstr(ha.error, "sign in again") != NULL);
+        printf("  revoked: %s\n", ha.error);
+
+        http_client_close(&ha.http);
+        http_client_close(&hc);
+    }
 
     // Nothing listening on this port: must fail quickly with a message
     setup(host, 1, "testtoken", "");

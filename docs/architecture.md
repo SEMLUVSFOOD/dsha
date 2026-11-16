@@ -8,9 +8,14 @@ source/
 │   ├── gfx.c           Software renderer for 256x192 BGR555 framebuffers
 │   ├── font8x8.c       8x8 bitmap font (ASCII + Latin-1)
 │   ├── ha.c            Home Assistant REST API: states and service calls
+│   ├── auth.c          Sign in with user/password (login flow) and tokens
+│   ├── discover.c      Finds Home Assistant in the local network
+│   ├── setup_server.c  Sign in web page served by the DS during setup
+│   ├── widgets.c       On-screen keyboard and list picker for the setup
 │   ├── entity.c        Entity model, per-domain actions and state formatting
 │   ├── http.c          HTTP/1.1 client (keep-alive, chunked) over BSD sockets
 │   ├── json_stream.c   Streaming (SAX) JSON parser
+│   ├── json_get.c      Picks values by path ("errors.base") from small JSON
 │   ├── config.c        config.ini parser
 │   ├── demo_data.c     Fake states for the offline demo
 │   └── platform.h      What a platform must provide (yield, milliseconds)
@@ -54,10 +59,46 @@ does at most one network request per frame, and only after the screen has
 been redrawn. That way, pressing A immediately shows the tile as "..." before
 the request blocks for a moment.
 
+## Setup wizard
+
+`source/nds/main.c` runs the wizard when there is no config file:
+
+1. **WiFi**: the networks saved in the console are tried first
+   (`Wifi_AutoConnect()`). Otherwise a list of networks is shown, refreshed
+   every second while DSWifi scans, and the password is typed with the
+   on-screen keyboard (`widgets.c`).
+2. **Server discovery** (`discover.c`): the DS has no mDNS, so it resolves a
+   few host names routers commonly register (`homeassistant`,
+   `homeassistant.lan`...), then scans the /24 subnet for port 8123 with 6
+   non-blocking connections at a time (lwIP on the DS has 8 sockets). Each
+   open port is confirmed with `GET /auth/providers`, which only Home
+   Assistant answers that way and doesn't need authentication.
+3. **Sign in** (`auth.c`): the same login flow the Home Assistant apps use:
+   `POST /auth/login_flow` with DSHA's client id
+   (`https://github.com/semluvsfood/dsha`), then the user name and password
+   (and a two-factor code if requested), then `POST /auth/token` to exchange
+   the authorization code for an access token and a refresh token. The
+   redirect URI has the same host as the client id, so Home Assistant accepts
+   it without fetching anything.
+4. **Phone page** (`setup_server.c`): while the sign in screen is shown, the
+   DS listens on port 80 and serves a small form. Submitting it runs the same
+   sign in code (`setup_process()`), and the page shows the progress
+   (two-factor code, errors, done).
+5. The config is written with `config_save_file()`. Only the refresh token is
+   stored, never the password.
+
+Access tokens last 30 minutes. `ha_http()` in `ha.c` gets a new one from the
+refresh token when a request returns 401 and repeats the request. Because the
+HTTP client only passes the body of 2xx responses to callbacks, the retry
+doesn't confuse the streaming parsers.
+
 ## Home Assistant API usage
 
 | Request | When |
 |---|---|
+| `GET /auth/providers` | Setup: confirms that a host is Home Assistant |
+| `POST /auth/login_flow`, `POST /auth/login_flow/<id>` | Setup: sign in (and two-factor code) |
+| `POST /auth/token` | Exchange the sign in code for tokens; renew the access token |
 | `GET /api/` | At start: checks address and token |
 | `GET /api/states` | At start/reload in automatic mode |
 | `GET /api/states/<entity_id>` | At start in manual mode, page refreshes, 1.5 s after an action |

@@ -176,6 +176,64 @@ int main(int argc, char *argv[])
     app_draw(&app, top, bottom);
     save("08_error");
 
+    // Setup wizard screens
+    picker_init(&app.picker, "Welcome to DSHA!",
+                "Control your Home Assistant from this DS.\n\n"
+                "The setup connects to WiFi, finds Home Assistant and signs "
+                "you in. It takes about a minute.");
+    app.picker.empty_text[0] = '\0';
+    picker_set_actions(&app.picker, "Start setup", "Try the demo");
+    app_show_picker(&app);
+    app_draw(&app, top, bottom);
+    save("09_setup_welcome");
+
+    picker_init(&app.picker, "Choose your WiFi network",
+                "DSHA couldn't connect with the WiFi settings saved in the "
+                "console. Pick your network:");
+    picker_add(&app.picker, "Guest", "Open  |  signal 88%");
+    picker_add(&app.picker, "MyHome", "WPA2  |  signal 71%");
+    picker_add(&app.picker, "Neighbour 5G", "WPA2  |  signal 30%");
+    picker_set_actions(&app.picker, "Rescan", "Type name");
+    app_show_picker(&app);
+    app_draw(&app, top, bottom);
+    save("10_setup_wifi");
+
+    kbd_init(&app.kbd, "Password for \"MyHome\"", "hunter2", 64, KBD_TEXT,
+             true, true);
+    snprintf(app.kbd.hint, sizeof(app.kbd.hint),
+             "Type the WiFi password. Press Y to show it.");
+    app_show_keyboard(&app);
+    app_draw(&app, top, bottom);
+    save("11_setup_password");
+
+    picker_init(&app.picker, "Found Home Assistant!",
+                "Tap your server, or type its address.");
+    app.picker.progress = 100;
+    picker_add(&app.picker, "homeassistant", "192.168.1.20:8123");
+    picker_set_actions(&app.picker, "Type address", "");
+    app_show_picker(&app);
+    app_draw(&app, top, bottom);
+    save("12_setup_found");
+
+    picker_init(&app.picker, "Sign in",
+                "On your phone or computer (same WiFi), open the address "
+                "above and sign in with your Home Assistant account.\n\n"
+                "Or tap \"Type on the DS\".");
+    snprintf(app.picker.big_text, sizeof(app.picker.big_text),
+             "http://192.168.1.57");
+    picker_set_actions(&app.picker, "Type on the DS", "Back");
+    app_show_picker(&app);
+    app_draw(&app, top, bottom);
+    save("13_setup_signin");
+
+    kbd_init(&app.kbd, "Two-factor code", "1234", 8, KBD_NUMERIC, false,
+             true);
+    snprintf(app.kbd.hint, sizeof(app.kbd.hint),
+             "Enter the code from your authenticator app.");
+    app_show_keyboard(&app);
+    app_draw(&app, top, bottom);
+    save("14_setup_code");
+
     printf("render: ok, %u requests\n", ha.http.requests);
     return 0;
 }

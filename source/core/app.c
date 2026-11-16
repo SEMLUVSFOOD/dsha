@@ -118,6 +118,18 @@ void app_show_dashboard(app_t *app)
     app->dirty = true;
 }
 
+void app_show_keyboard(app_t *app)
+{
+    app->screen = SCREEN_KEYBOARD;
+    app->dirty = true;
+}
+
+void app_show_picker(app_t *app)
+{
+    app->screen = SCREEN_PICKER;
+    app->dirty = true;
+}
+
 void app_toast(app_t *app, const char *text, bool error)
 {
     snprintf(app->toast, sizeof(app->toast), "%s", text);
@@ -402,6 +414,21 @@ bool app_update(app_t *app, const app_input *in, uint32_t now_ms)
         app->dirty = true;
     }
 
+    if (app->screen == SCREEN_KEYBOARD)
+    {
+        if (in->down || in->touching || app->kbd.touching)
+            app->dirty = true;
+        kbd_update(&app->kbd, in);
+        return app->dirty;
+    }
+    if (app->screen == SCREEN_PICKER)
+    {
+        if (in->down || in->touching != app->picker.touching)
+            app->dirty = true;
+        picker_update(&app->picker, in);
+        return app->dirty;
+    }
+
     if (app->screen != SCREEN_DASHBOARD)
         return app->dirty;
 
@@ -420,6 +447,12 @@ bool app_update(app_t *app, const app_input *in, uint32_t now_ms)
     {
         app->info_visible = false;
         app->dirty = true;
+    }
+    if ((k & IN_A) && app->info_visible)
+    {
+        // "A: run setup again" in the info panel
+        app->request_setup = true;
+        return app->dirty;
     }
     if (k & IN_Y)
     {
