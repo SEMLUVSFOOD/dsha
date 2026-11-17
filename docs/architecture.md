@@ -14,12 +14,14 @@ source/
 │   ├── widgets.c       On-screen keyboard and list picker for the setup
 │   ├── entity.c        Entity model, per-domain actions and state formatting
 │   ├── http.c          HTTP/1.1 client (keep-alive, chunked) over BSD sockets
+│   ├── tls.c           HTTPS: TLS connections with Mbed TLS
+│   ├── ca_roots.c      Trusted root certificates (tools/gen_ca_roots.py)
 │   ├── json_stream.c   Streaming (SAX) JSON parser
 │   ├── json_get.c      Picks values by path ("errors.base") from small JSON
 │   ├── validate.c      Validation of untrusted values (ids, hosts, tokens)
 │   ├── config.c        config.ini parser
 │   ├── demo_data.c     Fake states for the offline demo
-│   └── platform.h      What a platform must provide (yield, milliseconds)
+│   └── platform.h      What a platform must provide (yield, time, entropy)
 └── nds/
     └── main.c          DS entry point: video, input, WiFi, SD card, main loop
 custom_components/dsha/ Home Assistant integration (Python)
@@ -57,6 +59,18 @@ timeouts are measured with a VBlank counter.
 
 `poll()` is used instead of `select()` on purpose: lwIP on the DS uses its
 own `fd_set` layout, which doesn't match the one of the C library.
+
+**HTTPS.** With an `https://` address, `http.c` sends and receives through
+`tls.c`, a thin layer over Mbed TLS 3.6 (BlocksDS's `blocksds-mbedtls`
+package) on the same non-blocking socket. The handshake is the slow part on
+a DS: it runs in a cooperative thread with a 64 KB stack in main RAM
+(`platform_run_big_stack()`; the main thread's stack is 16 KB of DTCM), and
+X25519 is preferred for the key exchange because it's the fastest. After the
+handshake the connection is kept alive like a plain one. Certificates are
+verified against `ca_roots.c` (generated from Mozilla's CA store by
+`tools/gen_ca_roots.py`, kept in the ROM without copying) and
+`/dsha/ca.pem`. Over plain HTTP, non-local servers are refused; over HTTPS
+they're allowed.
 
 **Rendering.** Both screens use 16-bit bitmap backgrounds (mode 5, BG3). The UI
 is drawn into buffers in main RAM only when something changed, then copied to

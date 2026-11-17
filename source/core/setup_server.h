@@ -62,6 +62,7 @@ typedef struct {
     ha_login login;
     char login_host[128];
     int login_port;
+    bool login_https;
 } setup_server;
 
 // Starts listening. Returns false if the socket can't be opened.
@@ -89,8 +90,9 @@ login_result setup_sign_in(setup_server *s, ha_config *cfg,
 login_result setup_sign_in_mfa(setup_server *s, ha_config *cfg,
                                const char *code);
 
-// Splits "http://host:port/" into host and port (default 8123)
+// Splits "http://host:port/" or "https://host/" into host, port (default
+// 8123, or 443 for https://) and https.
 void setup_parse_server(const char *server, char *host, size_t host_len,
-                        int *port);
+                        int *port, bool *https);
 
 #endif // DSHA_SETUP_SERVER_H

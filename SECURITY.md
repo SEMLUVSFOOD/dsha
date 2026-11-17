@@ -29,6 +29,7 @@ week.
 | **Malicious server responses** (a rogue server, or tampering with the plain HTTP traffic) crashing the DS or corrupting memory | All parsers (HTTP, JSON, states, layout, config) work with fixed-size buffers and bounds checks. Sizes are capped. They are fuzzed with AddressSanitizer and UBSan in CI (`tests/fuzz.c`). |
 | **Header / path / config injection** through values from the network: WiFi names chosen by neighbours, tokens, entity ids, flow ids | Strict validation (`source/core/validate.c`): entity ids `[a-z0-9_].[a-z0-9_]`, tokens printable ASCII without spaces, host names `[A-Za-z0-9.-_:]`. Control characters are never written to `config.ini`; WiFi networks with such names aren't listed. |
 | **Password left in memory** | The password is only used for the sign in request and then wiped (request buffers included). It's never written to the SD card. |
+| **Eavesdropping / man in the middle on HTTPS** | Mbed TLS 3.6 (TLS 1.2 and 1.3). Certificates are always verified (chain and host name); there's no "ignore errors" option. Trusted roots: a selection of Mozilla's CA store compiled in, plus an optional `/dsha/ca.pem`. |
 | **Overly broad access** | The DS keeps a refresh token for one user, revocable in the Home Assistant profile. Use a non-admin user for the DS. |
 | **The integration leaking states** | `/api/dsha/states` only returns entities the authenticated user may read (Home Assistant permissions). Only admins can open the panel or change the layout. |
 | **XSS in the panel** (friendly names, area names are attacker-influenced) | Everything is HTML-escaped; tested in a browser with hostile names. |
@@ -37,12 +38,19 @@ week.
 
 ### Known limitations (by design)
 
-- **Plain HTTP on the local network.** The DS can't do TLS at a usable speed,
-  so DSHA talks plain HTTP to Home Assistant. Anyone who can sniff your WiFi
-  can see the session token, and the password during sign in. **WEP** (the
-  only security the DS and DS Lite support) is broken and offers little
-  protection: if you must use it, put the DS on an isolated network that can
-  only reach Home Assistant.
+- **Plain HTTP on the local network** (when you use an `http://` address).
+  Anyone who can sniff your WiFi can see the session token, and the password
+  during sign in. **WEP** (the only security the DS and DS Lite support) is
+  broken and offers little protection: if you must use it, put the DS on an
+  isolated network that can only reach Home Assistant, or use HTTPS.
+- **HTTPS randomness.** The DS has no good hardware random number generator.
+  TLS keys come from Mbed TLS's DRBG seeded with the WiFi chip's random
+  register mixed with an entropy pool of the timing (33 MHz timer) of network
+  events and user input, scanline position and touch noise, hashed with
+  SHA-256. This is reasonable but weaker than on a PC or phone.
+- **HTTPS certificate expiry** is checked with the DS's clock, which the user
+  sets by hand. If the clock has never been set (before 2025), expiry isn't
+  checked; the signature and the host name always are.
 - **Plain text token on the SD card.** The DS has no secure storage. Anyone
   with the SD card can use the session: revoke it in your Home Assistant
   profile (*Security → Refresh tokens*) if the card or console is lost.

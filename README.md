@@ -31,8 +31,11 @@ or the buttons.
   *DS Dashboard* page to the sidebar where you drag and drop entities,
   automations and scenes into the DS's pages, exactly how you want them.
 - **Offline demo mode** to try it without a server.
-- **Security first**: local network only, pairing code for the setup page,
-  password never stored, hardened and fuzzed parsers. See
+- **HTTPS too**: connect to the local `http://` address, or to an
+  `https://` address like your Nabu Casa remote URL or your own domain. The
+  certificate is always verified.
+- **Security first**: plain HTTP only on the local network, pairing code for
+  the setup page, password never stored, hardened and fuzzed parsers. See
   [SECURITY.md](SECURITY.md).
 - **Open source** (MIT), with desktop unit tests and a fake Home Assistant
   server for development.
@@ -61,9 +64,11 @@ or the buttons.
 | 3DS / 2DS | Open, WEP (WPA2 in DSi mode: untested) | Run it with TWiLight Menu++. Reports welcome! |
 | Emulators | — | melonDS (with WiFi emulation) or the offline demo in any emulator. |
 
-**Home Assistant** — any recent version, reachable on your local network over
-plain HTTP (the default `http://<ip>:8123`). You sign in with your normal Home
-Assistant user name and password; no token or config file needed.
+**Home Assistant** — any recent version, reachable from the DS's network:
+either on the local network over plain HTTP (the default `http://<ip>:8123`),
+or at an `https://` address (Nabu Casa remote access, DuckDNS, a reverse
+proxy...). You sign in with your normal Home Assistant user name and password;
+no token or config file needed.
 
 ## Quick start
 
@@ -77,7 +82,7 @@ Assistant user name and password; no token or config file needed.
 | | |
 |---|---|
 | <img src="docs/screenshots/09_setup_welcome.png" width="200"> | **WiFi.** DSHA first tries the WiFi settings saved in the console. If there are none, it lists the networks around you: tap yours and type the password on the touch keyboard. |
-| <img src="docs/screenshots/12_setup_found.png" width="200"> | **Find Home Assistant.** DSHA searches your network and lists the Home Assistant servers it finds. Tap yours. (You can also type the IP address.) |
+| <img src="docs/screenshots/12_setup_found.png" width="200"> | **Find Home Assistant.** DSHA searches your network and lists the Home Assistant servers it finds. Tap yours. Or tap *Type the address* and enter its IP, or an `https://` address like `https://xxxx.ui.nabu.casa` (the keyboard has an `https://` key). |
 | <img src="docs/screenshots/13_setup_signin.png" width="200"> | **Sign in.** The DS shows an address like `http://192.168.1.57` and a 6-digit code. Open the address on your **phone or computer**, type the code and sign in with your Home Assistant user name and password, like on the Home Assistant website. Prefer the DS? Tap **Type on the DS** and use the keyboard. Two-factor codes are supported. |
 
 <p align="center">
@@ -156,11 +161,15 @@ Entities from other domains are shown (read only) when you list them with
 
 ## Limitations
 
-- **No HTTPS.** TLS on a 67 MHz CPU is slow and memory hungry, so DSHA talks
-  plain HTTP. Use the local address of Home Assistant, not your Nabu Casa or
-  other remote `https://` URL (DSHA refuses non-local addresses). Only use
-  DSHA on a network you trust: the sign in and the session token travel
-  unencrypted (as with any `http://` access to Home Assistant). Details in
+- **HTTPS is slow to start.** The first secure connection takes a few
+  seconds of maths on a 67 MHz DS (less on a DSi); after that the connection
+  is kept open and it's as fast as HTTP. Certificates from the common
+  authorities (Let's Encrypt, Google, Sectigo/ZeroSSL, DigiCert...) work out
+  of the box; for a self-signed certificate, copy it to `/dsha/ca.pem` (see
+  [configuration](docs/configuration.md#https)).
+- **Plain HTTP is local only.** Over `http://`, the sign in and the session
+  token travel unencrypted, so DSHA refuses non-local `http://` addresses. Use
+  `https://` for anything outside your network. Details in
   [SECURITY.md](SECURITY.md).
 - **WPA2 only on DSi.** The original DS WiFi hardware only supports open and
   WEP networks. If your router is WPA2-only, use a DSi, or create an open/WEP
@@ -174,13 +183,13 @@ Entities from other domains are shown (read only) when you list them with
 
 ## Project status
 
-The app has been tested with the desktop test suite (HTTP client, streaming
-parser, sign in, network discovery, phone setup page and UI logic against a
-fake Home Assistant server) and the real `.nds` has been run in an emulator
+The app has been tested with the desktop test suite (HTTP and HTTPS client,
+streaming parser, sign in, network discovery, phone setup page and UI logic
+against a fake Home Assistant server) and the real `.nds` has been run in an emulator
 (dashboard and layout pages in demo mode, setup wizard screens and keyboard).
 The Home Assistant integration is tested inside a real Home Assistant core,
-and its panel in a browser (drag and drop included). The WiFi parts
-haven't been tried on real hardware yet. See the
+and its panel in a browser (drag and drop included). The WiFi parts and
+HTTPS haven't been tried on real hardware yet. See the
 [changelog](CHANGELOG.md). Reports from real hardware are very welcome:
 please [open an issue](https://github.com/semluvsfood/dsha/issues) with your
 console model and how you launched DSHA.
@@ -201,8 +210,9 @@ as described in [SECURITY.md](SECURITY.md).
 
 DSHA (the DS app and the Home Assistant integration) is released under the
 [MIT license](LICENSE). The ROM includes libraries
-from BlocksDS (libnds, DSWifi with lwIP and Mbed TLS) under their own
-licenses; see [licenses/](licenses/README.md).
+from BlocksDS (libnds, DSWifi with lwIP, Mbed TLS) and root certificates from
+Mozilla's CA store under their own licenses; see
+[licenses/](licenses/README.md).
 
 DSHA is not affiliated with Nintendo or with the Home Assistant project.
 "Nintendo DS" is a trademark of Nintendo. "Home Assistant" is a trademark of

@@ -2,8 +2,9 @@
 #
 # Copyright (c) 2026 DSHA contributors
 #
-# Builds dsha.nds with BlocksDS (https://blocksds.skylyrac.net). If you don't
-# have BlocksDS installed, use "make docker" (see docs/building.md).
+# Builds dsha.nds with BlocksDS (https://blocksds.skylyrac.net) and its Mbed
+# TLS package (wf-pacman -S blocksds-mbedtls). If you don't have BlocksDS
+# installed, use "make docker" (see docs/building.md).
 
 BLOCKSDS	?= /opt/blocksds/core
 BLOCKSDSEXT	?= /opt/blocksds/external
@@ -27,8 +28,9 @@ endif
 CFLAGS		:= -Wno-format-truncation
 
 ARM7ELF		:= $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi.elf
-LIBS		:= -ldswifi9 -lnds9
-LIBDIRS		:= $(BLOCKSDS)/libs/dswifi \
+LIBS		:= -lmbedtls -lmbedx509 -lmbedcrypto -ldswifi9 -lnds9
+LIBDIRS		:= $(BLOCKSDSEXT)/mbedtls \
+		   $(BLOCKSDS)/libs/dswifi \
 		   $(BLOCKSDS)/libs/libnds
 
 # Build inside the official BlocksDS docker image
@@ -38,9 +40,13 @@ DOCKER_IMAGE	?= skylyrac/blocksds:slim-v1.25.0
 
 .PHONY: docker test screenshots test-integration test-panel
 
+# The image doesn't include Mbed TLS: install it (as root), build, and give
+# the files back to the user.
 docker:
-	docker run --rm -v "$(CURDIR)":/work -w /work -u $$(id -u):$$(id -g) \
-		$(DOCKER_IMAGE) make
+	docker run --rm -v "$(CURDIR)":/work -w /work $(DOCKER_IMAGE) sh -c \
+		'wf-pacman -Sy --noconfirm blocksds-mbedtls >/dev/null && make; \
+		 rc=$$?; chown -R $(shell id -u):$(shell id -g) build $(NAME).nds \
+		 2>/dev/null; exit $$rc'
 
 test:
 	$(MAKE) -C tests test

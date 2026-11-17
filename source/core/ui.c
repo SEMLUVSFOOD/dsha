@@ -266,7 +266,7 @@ static void draw_info_panel(app_t *app, color_t *fb)
     if (app->ha->demo)
         snprintf(buf, sizeof(buf), "none (demo mode)");
     else
-        snprintf(buf, sizeof(buf), "%s:%d", app->cfg->host, app->cfg->port);
+        config_server_url(app->cfg, buf, sizeof(buf));
     detail_line(fb, &y, "Server", buf);
     detail_line(fb, &y, "DS IP", app->ip);
     snprintf(buf, sizeof(buf), "%d%s (%s)", app->ha->count,

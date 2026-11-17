@@ -4,8 +4,9 @@
 # Copyright (c) 2026 DSHA contributors
 #
 # Starts tests/fake_ha.py in every response framing mode and runs the network
-# test program against it. With --screenshots it runs the screenshot renderer
-# instead and converts its PPM output to PNG.
+# test program against it. With --tls the same tests run over HTTPS (with
+# test certificates made by openssl). With --screenshots it runs the screenshot
+# renderer instead and converts its PPM output to PNG.
 
 import os
 import subprocess
@@ -16,11 +17,110 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fake_ha  # noqa: E402
 
 
-def start(mode, bind="127.0.0.1", port=0):
+def start(mode, bind="127.0.0.1", port=0, tls=None):
     httpd = fake_ha.make_server(bind, port, mode)
+    if tls is not None:
+        httpd.socket = tls.wrap_socket(httpd.socket, server_side=True)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     return httpd, httpd.server_address[1]
+
+
+CERT_CONFIG = """
+[req]
+distinguished_name = dn
+[dn]
+[ca]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash
+[server]
+basicConstraints = CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:localhost
+"""
+
+
+def make_certs(d):
+    """Test PKI: a CA with an EC and an RSA server certificate for
+    "localhost", and another CA (not trusted by the tests) with its own
+    server certificate."""
+    d = os.path.abspath(d)
+    os.makedirs(d, exist_ok=True)
+    cnf = os.path.join(d, "openssl.cnf")
+    with open(cnf, "w") as f:
+        f.write(CERT_CONFIG)
+
+    def run(*args):
+        subprocess.run(["openssl", *args], check=True, cwd=d,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def ec_key(name):
+        run("ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", name)
+
+    def ca(name):
+        ec_key(name + ".key")
+        run("req", "-x509", "-new", "-key", name + ".key", "-subj",
+            f"/CN=DSHA {name}", "-days", "3650", "-config", cnf,
+            "-extensions", "ca", "-out", name + ".pem")
+
+    def server(name, ca_name, rsa=False):
+        if rsa:
+            run("genrsa", "-out", name + ".key", "2048")
+        else:
+            ec_key(name + ".key")
+        run("req", "-new", "-key", name + ".key", "-subj", "/CN=localhost",
+            "-config", cnf, "-out", name + ".csr")
+        run("x509", "-req", "-in", name + ".csr", "-CA", ca_name + ".pem",
+            "-CAkey", ca_name + ".key", "-set_serial", "2", "-days", "3650",
+            "-extfile", cnf, "-extensions", "server", "-out", name + ".pem")
+
+    ca("ca")
+    server("server_ec", "ca")
+    server("server_rsa", "ca", rsa=True)
+    ca("other_ca")
+    server("server_other", "other_ca")
+    return {n: os.path.join(d, n) for n in
+            ("ca", "server_ec", "server_rsa", "server_other")}
+
+
+def tls_context(certs, name, max_version=None):
+    import ssl
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certs[name] + ".pem", certs[name] + ".key")
+    if max_version is not None:
+        ctx.maximum_version = max_version
+    return ctx
+
+
+def tls_tests(binary):
+    import ssl
+    certs = make_certs(os.path.join(os.path.dirname(binary), "tls"))
+    ca = certs["ca"] + ".pem"
+    failed = 0
+    plain, plain_port = start("length")
+    for mode, key, version in (("length", "server_ec", None),
+                               ("chunked", "server_rsa", ssl.TLSVersion.TLSv1_2),
+                               ("close", "server_ec", ssl.TLSVersion.TLSv1_2)):
+        print(f"== fake_ha mode: {mode} over HTTPS ({key}, "
+              f"{'TLS 1.2' if version else 'TLS 1.3'})")
+        httpd, port = start(mode, tls=tls_context(certs, key, version))
+        rc = subprocess.call([binary, "localhost", str(port), "--tls", ca,
+                              str(plain_port)])
+        httpd.shutdown()
+        if rc != 0:
+            failed += 1
+
+    # A certificate from a CA the DS doesn't know
+    print("== HTTPS with an untrusted certificate")
+    httpd, port = start("length", tls=tls_context(certs, "server_other"))
+    rc = subprocess.call([binary, "localhost", str(port), "--tls-untrusted"])
+    httpd.shutdown()
+    plain.shutdown()
+    if rc != 0:
+        failed += 1
+    return 1 if failed else 0
 
 
 def ppm_to_png(src, dst):
@@ -239,6 +339,9 @@ def main():
 
     if sys.argv[1] == "--screenshots":
         return screenshots(sys.argv[2], sys.argv[3])
+
+    if sys.argv[1] == "--tls":
+        return tls_tests(sys.argv[2])
 
     binary = sys.argv[1]
     failed = 0

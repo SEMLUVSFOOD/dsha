@@ -273,7 +273,9 @@ static void page_form(setup_server *s, int fd)
              "autocomplete=\"off\" required placeholder=\"6 digits\">"
              "<label>Home Assistant address</label>"
              "<input name=\"server\" value=\"%s\" "
-             "placeholder=\"192.168.1.10:8123\" autocapitalize=\"off\">"
+             "placeholder=\"192.168.1.10:8123 or https://...\" "
+             "autocapitalize=\"off\" autocorrect=\"off\" "
+             "spellcheck=\"false\" inputmode=\"url\">"
              "<label>User name</label>"
              "<input name=\"username\" autocapitalize=\"off\" "
              "autocomplete=\"username\">"
@@ -518,21 +520,28 @@ setup_event setup_server_poll(setup_server *s)
 // -------------
 
 void setup_parse_server(const char *server, char *host, size_t host_len,
-                        int *port)
+                        int *port, bool *https)
 {
     char tmp[160];
     const char *v = server;
+    while (*v == ' ')
+        v++;
+    *https = false;
     if (strncasecmp(v, "http://", 7) == 0)
         v += 7;
     else if (strncasecmp(v, "https://", 8) == 0)
+    {
         v += 8;
+        *https = true;
+    }
     snprintf(tmp, sizeof(tmp), "%s", v);
 
-    char *slash = strchr(tmp, '/');
+    // Cut the path ("/lovelace/0"), and spaces at the end
+    char *slash = strpbrk(tmp, "/?# ");
     if (slash)
         *slash = '\0';
 
-    *port = 8123;
+    *port = *https ? 443 : 8123;
     char *colon = strrchr(tmp, ':');
     if (colon && strchr(tmp, ':') == colon)
     {
@@ -555,6 +564,7 @@ static void finish(setup_server *s, ha_config *cfg)
 {
     snprintf(cfg->host, sizeof(cfg->host), "%s", s->login_host);
     cfg->port = s->login_port;
+    cfg->https = s->login_https;
     cfg->demo = false;
     s->state = SETUP_STATE_DONE;
     set_status(s, false, "Signed in to %s. Your DS is ready!", s->login_host);
@@ -567,7 +577,7 @@ login_result setup_sign_in(setup_server *s, ha_config *cfg,
     static http_client c;
 
     setup_parse_server(server, s->login_host, sizeof(s->login_host),
-                       &s->login_port);
+                       &s->login_port, &s->login_https);
     if (s->login_host[0] == '\0')
     {
         set_status(s, true, "Please enter the address of Home Assistant%s",
@@ -586,16 +596,25 @@ login_result setup_sign_in(setup_server *s, ha_config *cfg,
         return LOGIN_INVALID;
     }
 
-    http_client_init(&c, s->login_host, s->login_port);
+    http_client_init_url(&c, s->login_host, s->login_port, s->login_https);
     c.allow_public = cfg->allow_public_server;
     c.timeout_ms = 5000;
 
     if (!auth_probe(&c))
     {
         http_client_close(&c);
-        set_status(s, true,
-                   "Can't find Home Assistant at %s. Check the address "
-                   "(use the IP, like 192.168.1.10:8123).", server);
+        if (c.last_error[0] != '\0')
+        {
+            char msg[sizeof(s->status)];
+            snprintf(msg, sizeof(msg), "Can't find Home Assistant at %s: %s",
+                     server, c.last_error);
+            set_status(s, true, "%s", msg);
+        }
+        else
+            set_status(s, true,
+                       "Can't find Home Assistant at %s. Check the address "
+                       "(like 192.168.1.10:8123 or https://my.domain).",
+                       server);
         return LOGIN_ERROR;
     }
 
@@ -609,6 +628,7 @@ login_result setup_sign_in(setup_server *s, ha_config *cfg,
         config_defaults(&tmp);
         snprintf(tmp.host, sizeof(tmp.host), "%s", s->login_host);
         tmp.port = s->login_port;
+        tmp.https = s->login_https;
         snprintf(tmp.token, sizeof(tmp.token), "%s", token);
         tmp.num_entities = 1; // Don't care about entities here
         tmp.allow_public_server = cfg->allow_public_server;
@@ -661,7 +681,7 @@ login_result setup_sign_in_mfa(setup_server *s, ha_config *cfg,
                                const char *code)
 {
     static http_client c;
-    http_client_init(&c, s->login_host, s->login_port);
+    http_client_init_url(&c, s->login_host, s->login_port, s->login_https);
     c.allow_public = cfg->allow_public_server;
     c.timeout_ms = 5000;
 

@@ -34,6 +34,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      # Before init: Mbed TLS itself isn't analyzed
+      - name: Build Mbed TLS 3.6
+        if: matrix.build-mode == 'manual'
+        run: sh tests/get_mbedtls.sh
       - uses: github/codeql-action/init@9418214df1f2c4b8128c770156c409013b07d6b9 # v3
         with:
           languages: ${{ matrix.language }}

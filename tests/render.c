@@ -238,6 +238,16 @@ int main(int argc, char *argv[])
     app_draw(&app, top, bottom);
     save("14_setup_code");
 
+    kbd_init(&app.kbd, "Home Assistant address", "https://abc123.ui.nabu.ca",
+             100, KBD_URL, false, true);
+    snprintf(app.kbd.hint, sizeof(app.kbd.hint),
+             "Its IP address, like 192.168.1.10 (add :port if it isn't "
+             "8123), or its https:// address, like "
+             "https://xxxx.ui.nabu.casa");
+    app_show_keyboard(&app);
+    app_draw(&app, top, bottom);
+    save("17_setup_address");
+
     // Layout from the DS Dashboard panel (the demo uses one)
     {
         static ha_config dcfg;

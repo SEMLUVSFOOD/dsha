@@ -16,6 +16,7 @@
 typedef struct {
     char host[128];
     int port;
+    bool https;              // Connect with TLS ("https://" address)
     char token[512];         // Long-lived access token...
     char refresh_token[512]; // ...or refresh token from the sign in screen
 
@@ -63,6 +64,10 @@ bool config_save_file(const ha_config *cfg, const char *path);
 
 // Same, into a memory buffer. Returns the length written.
 size_t config_write(const ha_config *cfg, char *out, size_t out_len);
+
+// The server as typed by users: "host:port" for HTTP (the port is always
+// shown), "https://host" or "https://host:port" for HTTPS.
+void config_server_url(const ha_config *cfg, char *out, size_t out_len);
 
 // Returns true if the domain of entity_id is allowed by cfg->domains (or if
 // the list is empty).

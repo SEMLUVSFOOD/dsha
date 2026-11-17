@@ -2,8 +2,12 @@
 //
 // Copyright (c) 2026 DSHA contributors
 //
-// Network tests against tests/fake_ha.py. Usage: test_http <host> <port>
-// (run_http_tests.py starts the server and runs this program).
+// Network tests against tests/fake_ha.py. Usage:
+//   test_http <host> <port>                          plain HTTP
+//   test_http <host> <port> --tls <ca.pem> <plain>   HTTPS (plain: port of a
+//                                                    plain HTTP fake_ha)
+//   test_http <host> <port> --tls-untrusted          HTTPS, unknown CA
+// (run_http_tests.py starts the servers and runs this program).
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,9 +18,11 @@
 #include "ha.h"
 #include "platform.h"
 #include "testlib.h"
+#include "tls.h"
 
 static ha_config cfg;
 static ha_client ha;
+static bool use_tls;
 
 static ha_entity *find(const char *id)
 {
@@ -32,8 +38,8 @@ static void setup(const char *host, int port, const char *token,
                   const char *extra)
 {
     char text[1024], err[128];
-    snprintf(text, sizeof(text), "host=%s\nport=%d\ntoken=%s\n%s", host, port,
-             token, extra);
+    snprintf(text, sizeof(text), "host=%s\nport=%d\ntoken=%s\nhttps=%d\n%s",
+             host, port, token, use_tls, extra);
     config_defaults(&cfg);
     if (!config_parse(&cfg, text, err, sizeof(err)))
     {
@@ -62,6 +68,36 @@ int main(int argc, char *argv[])
     }
     const char *host = argv[1];
     int port = atoi(argv[2]);
+    int plain_port = 0;
+
+    if (argc >= 4 && strcmp(argv[3], "--tls-untrusted") == 0)
+    {
+        // The server's CA isn't trusted: no connection, a clear message,
+        // and the token is never sent
+        use_tls = true;
+        CHECK(tls_trusted_count() >= 19); // The built-in roots parse
+        setup(host, port, "testtoken", "");
+        CHECK(!ha_check(&ha));
+        CHECK(strstr(ha.error, "isn't trusted") != NULL);
+        printf("  untrusted: %s\n", ha.error);
+
+        static http_client hc;
+        http_client_init_url(&hc, host, port, true);
+        CHECK(!auth_probe(&hc));
+        CHECK(strstr(hc.last_error, "isn't trusted") != NULL);
+        TEST_REPORT("test_http (untrusted certificate)");
+    }
+
+    if (argc >= 6 && strcmp(argv[3], "--tls") == 0)
+    {
+        use_tls = true;
+        int builtin = tls_trusted_count();
+        CHECK(tls_set_ca_file(argv[4]));
+        CHECK(tls_trusted_count() == builtin + 1);
+        CHECK(!tls_set_ca_file("Makefile")); // Not a certificate
+        CHECK(tls_set_ca_file("/does/not/exist.pem")); // Missing: ignored
+        plain_port = atoi(argv[5]);
+    }
 
     // Wrong token
     setup(host, port, "wrong", "");
@@ -130,7 +166,7 @@ int main(int argc, char *argv[])
     {
         static http_client hc;
         static ha_login login;
-        http_client_init(&hc, host, port);
+        http_client_init_url(&hc, host, port, use_tls);
         hc.timeout_ms = 3000;
 
         CHECK(auth_probe(&hc));
@@ -185,7 +221,7 @@ int main(int argc, char *argv[])
     // ----------------------------------------------------
     {
         static http_client hc;
-        http_client_init(&hc, host, port);
+        http_client_init_url(&hc, host, port, use_tls);
         http_result r;
         char body[8192];
         FILE *f = fopen("fixtures/layout.json", "rb");
@@ -267,14 +303,41 @@ int main(int argc, char *argv[])
     CHECK(ha.error[0] != '\0');
     printf("  closed port error: %s\n", ha.error);
 
-    // Public addresses are refused: no credentials over the internet in
-    // clear text (and no packet is sent at all)
-    setup("8.8.8.8", 8123, "testtoken", "");
-    start = platform_millis();
-    CHECK(!ha_check(&ha));
-    CHECK(strstr(ha.error, "local network") != NULL);
-    CHECK(platform_millis() - start < 100);
-    printf("  public server: %s\n", ha.error);
+    if (!use_tls)
+    {
+        // Public addresses are refused: no credentials over the internet in
+        // clear text (and no packet is sent at all)
+        setup("8.8.8.8", 8123, "testtoken", "");
+        start = platform_millis();
+        CHECK(!ha_check(&ha));
+        CHECK(strstr(ha.error, "local network") != NULL);
+        CHECK(platform_millis() - start < 100);
+        printf("  public server: %s\n", ha.error);
+    }
+    else
+    {
+        // The certificate is for "localhost", not for "127.0.0.1"
+        setup("127.0.0.1", port, "testtoken", "");
+        CHECK(!ha_check(&ha));
+        CHECK(strstr(ha.error, "isn't valid for 127.0.0.1") != NULL);
+        printf("  wrong name: %s\n", ha.error);
+
+        // https:// to a plain HTTP server
+        setup(host, plain_port, "testtoken", "");
+        start = platform_millis();
+        CHECK(!ha_check(&ha));
+        CHECK(ha.error[0] != '\0');
+        CHECK(platform_millis() - start < 3500);
+        printf("  https to http server: %s\n", ha.error);
+
+        // http:// to the HTTPS server
+        static http_client hc;
+        http_client_init(&hc, host, port);
+        hc.timeout_ms = 3000;
+        CHECK(!auth_probe(&hc));
+        printf("  http to https server: %s\n", hc.last_error);
+        http_client_close(&hc);
+    }
 
     // Unknown host
     setup("does-not-exist.invalid", port, "testtoken", "");

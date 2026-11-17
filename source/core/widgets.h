@@ -20,7 +20,8 @@
 
 typedef enum {
     KBD_TEXT,    // Full QWERTY keyboard with shift and symbols
-    KBD_NUMERIC, // Digits, '.' and ':' (codes, IP addresses)
+    KBD_NUMERIC, // Digits, '.' and ':' (codes)
+    KBD_URL,     // QWERTY with ':' and '/', a "https://" key and "Clear"
 } kbd_mode;
 
 #define KBD_ROWS 4

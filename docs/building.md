@@ -12,18 +12,22 @@ make docker
 ```
 
 This runs the build inside the official `skylyrac/blocksds:slim-v1.25.0`
-image. If you don't have `make` either:
+image, after installing BlocksDS's Mbed TLS package in it (used for HTTPS).
+If you don't have `make` either:
 
 ```sh
-docker run --rm -v "$PWD":/work -w /work skylyrac/blocksds:slim-v1.25.0 make
+docker run --rm -v "$PWD":/work -w /work skylyrac/blocksds:slim-v1.25.0 \
+    sh -c "wf-pacman -Sy --noconfirm blocksds-mbedtls && make"
 ```
 
 ## Option 2: BlocksDS installed locally
 
 Follow the [BlocksDS setup guide](https://blocksds.skylyrac.net/docs/setup/)
-(it uses the Wonderful toolchain on Linux/macOS/Windows with MSYS2), then:
+(it uses the Wonderful toolchain on Linux/macOS/Windows with MSYS2), then
+install Mbed TLS and build:
 
 ```sh
+wf-pacman -S blocksds-mbedtls
 make
 ```
 
@@ -33,7 +37,11 @@ The Makefile uses `$BLOCKSDS` (default `/opt/blocksds/core`).
 
 The core of the app (HTTP client, JSON parser, Home Assistant API, UI logic
 and rendering) is portable C, so it can be tested on a PC. You need `gcc`,
-`make`, `python3` and, for screenshots, `Pillow`.
+`make`, `python3`, `openssl` (to make test certificates), Mbed TLS 3.6 and,
+for screenshots, `Pillow`. Mbed TLS: `libmbedtls-dev` on Debian 13 / Ubuntu
+25.04 or newer, `brew install mbedtls@3` on macOS, or
+`sh tests/get_mbedtls.sh` anywhere (downloads and builds it in
+`tests/build/mbedtls`; CI uses this).
 
 ```sh
 make test          # unit tests + network tests against tests/fake_ha.py
@@ -47,7 +55,11 @@ fake server, and drives the phone sign in page like a browser would.
 The network tests run three times, with the fake server answering with
 `Content-Length`, with chunked transfer encoding and with
 `Connection: close`, to cover the different ways an HTTP server can frame a
-response. The tests are built with AddressSanitizer and UBSan.
+response. Then they run again over HTTPS against the same server with test
+certificates: TLS 1.3 and 1.2, EC and RSA certificates, keep-alive and a new
+connection per request, plus a certificate for the wrong name, an unknown
+authority, and HTTP/HTTPS mix-ups. The tests are built with AddressSanitizer
+and UBSan.
 
 ## Trying it in an emulator
 

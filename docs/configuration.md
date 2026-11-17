@@ -33,8 +33,9 @@ file. The wizard saves to the file that was loaded, or to `sd:/dsha/config.ini`
 
 | Key | Default | Description |
 |---|---|---|
-| `host` | *(required)* | IP address or DNS name of Home Assistant. `http://192.168.1.10:8123/` style URLs are accepted too (the port in the URL is used). `.local` names don't work. |
+| `host` | *(required)* | IP address or DNS name of Home Assistant. URLs are accepted too: `http://192.168.1.10:8123/`, or `https://xxxx.ui.nabu.casa` for HTTPS (the port in the URL is used; `https://` means port 443 if there's none). `.local` names don't work. |
 | `port` | `8123` | TCP port of Home Assistant. |
+| `https` | `0` | `1` connects with HTTPS (set automatically by an `https://` address in `host`). See [HTTPS](#https). |
 | `token` | *(see below)* | Long-lived access token. |
 | `refresh_token` | *(see below)* | Session created by signing in with the setup wizard. Written by DSHA; you can revoke it in your Home Assistant profile (*Security → Refresh tokens*, listed as `https://github.com/semluvsfood/dsha`). |
 | `wifi_ssid` | *(empty)* | Network to connect to. If empty, the WiFi settings saved in the console (WFC / DSi settings) are used. Hidden networks are supported. |
@@ -43,7 +44,7 @@ file. The wizard saves to the file that was loaded, or to `sd:/dsha/config.ini`
 | `refresh_seconds` | `15` | How often the entities on screen are refreshed. `0` disables auto refresh (press Y to refresh). |
 | `entity` | *(none)* | An entity to show. Repeat the line for more entities, or list several separated by commas. They are shown in this order. Up to 128. |
 | `domains` | *(all)* | Only used when there are no `entity` lines: comma separated list of the domains to show, like `light, switch, climate`. |
-| `allow_public_server` | `0` | DSHA refuses servers that aren't on a local/private network, because the connection isn't encrypted. `1` allows them; **don't**, unless the "public" address is really inside a network you trust (some VPNs). |
+| `allow_public_server` | `0` | Over plain HTTP, DSHA refuses servers that aren't on a local/private network, because the connection isn't encrypted. `1` allows them; **don't**, unless the "public" address is really inside a network you trust (some VPNs). Use HTTPS instead. Not needed for `https://` servers. |
 | `use_layout` | `1` | Use the layout of the DS Dashboard panel when the [Home Assistant integration](integration.md) is installed. `0` ignores it. |
 | `demo` | `0` | `1` starts an offline demo with fake entities. No WiFi or server needed. |
 
@@ -94,6 +95,31 @@ it contains your token. `nitrofs/config.ini` is in `.gitignore` so it isn't
 committed by accident. A config on the SD card has priority over the embedded
 one.
 
+## HTTPS
+
+Use an `https://` address in the setup (or in `host`) to connect with TLS:
+your Nabu Casa remote URL (`https://xxxx.ui.nabu.casa`), a DuckDNS or own
+domain, or a reverse proxy. TLS 1.2 and 1.3 are supported.
+
+<p align="center">
+  <img src="screenshots/17_setup_address.png" width="256" alt="Typing an https:// address on the DS">
+</p>
+
+- **The certificate is always checked**: it must be valid for the host name
+  and signed by a trusted authority. DSHA includes the root certificates of
+  Let's Encrypt (Nabu Casa, DuckDNS, Tailscale), Google Trust Services
+  (Cloudflare), Sectigo/ZeroSSL, DigiCert, Amazon, GlobalSign, GoDaddy,
+  SSL.com and Microsoft.
+- **Self-signed certificate or private CA**: copy the certificate (or the CA
+  certificate) in PEM format to `/dsha/ca.pem` on the SD card. It's trusted in
+  addition to the built-in ones. The name in the certificate must still match
+  the address you type (an IP address only works if the certificate has it).
+- **The DS clock**: certificates are checked for expiry using the DS's date.
+  If it's wrong, set it in the console settings. (A never-set clock, before
+  2025, is ignored.)
+- **Speed**: the first connection takes a few seconds (public key maths at
+  67 MHz); then the connection is kept open and requests are fast.
+
 ## Security notes
 
 - The token or session in `config.ini` gives access to your Home Assistant
@@ -103,10 +129,10 @@ one.
 - During setup, the DS serves the sign in page on port 80 of your local
   network. It only accepts the 6-digit code shown on the DS, and it stops as
   soon as you are signed in.
-- DSHA only talks to servers on your local network (see
+- Over plain HTTP, DSHA only talks to servers on your local network (see
   `allow_public_server`). Don't expose Home Assistant's plain HTTP port to the
-  internet for the DS.
+  internet for the DS: use HTTPS.
 - See [SECURITY.md](../SECURITY.md) for the full threat model.
-- The connection is plain HTTP, so anyone able to sniff your WiFi network can
-  see the token. WEP is easy to break: if you use a WEP or open network for
-  the DS, isolate it from the rest of your network.
+- A plain HTTP connection can be sniffed by anyone on your WiFi network,
+  including the token. WEP is easy to break: if you use a WEP or open network
+  for the DS, isolate it from the rest of your network, or use HTTPS.

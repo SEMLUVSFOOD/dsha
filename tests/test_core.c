@@ -15,6 +15,7 @@
 #include "ha.h"
 #include "json_get.h"
 #include "json_stream.h"
+#include "setup_server.h"
 #include "validate.h"
 #include "testlib.h"
 
@@ -152,6 +153,66 @@ static void test_config(void)
     CHECK(config_domain_allowed(&cfg, "switch.a"));
     CHECK(!config_domain_allowed(&cfg, "sensor.a"));
     CHECK(!config_domain_allowed(&cfg, "lightx.a"));
+    CHECK(!cfg.https);
+}
+
+static void test_config_https(void)
+{
+    static ha_config cfg;
+    char err[128], url[160];
+
+    // https:// address: TLS, port 443 by default
+    config_defaults(&cfg);
+    CHECK(config_parse(&cfg, "host = https://abc123.ui.nabu.casa/lovelace\n"
+                             "token=x\n", err, sizeof(err)));
+    CHECK(cfg.https);
+    CHECK_STR(cfg.host, "abc123.ui.nabu.casa");
+    CHECK(cfg.port == 443);
+    config_server_url(&cfg, url, sizeof(url));
+    CHECK_STR(url, "https://abc123.ui.nabu.casa");
+
+    config_defaults(&cfg);
+    CHECK(config_parse(&cfg, "url = HTTPS://ha.example.org:8443\ntoken=x\n",
+                       err, sizeof(err)));
+    CHECK(cfg.https);
+    CHECK(cfg.port == 8443);
+    config_server_url(&cfg, url, sizeof(url));
+    CHECK_STR(url, "https://ha.example.org:8443");
+
+    // Separate keys
+    config_defaults(&cfg);
+    CHECK(config_parse(&cfg, "host=ha.lan\nport=8123\nhttps=1\ntoken=x\n",
+                       err, sizeof(err)));
+    CHECK(cfg.https);
+    CHECK(cfg.port == 8123);
+
+    // http:// stays plain
+    config_defaults(&cfg);
+    CHECK(config_parse(&cfg, "host=http://10.0.0.2\ntoken=x\n", err,
+                       sizeof(err)));
+    CHECK(!cfg.https);
+    CHECK(cfg.port == 8123);
+    config_server_url(&cfg, url, sizeof(url));
+    CHECK_STR(url, "10.0.0.2:8123");
+
+    // Addresses typed in the setup (DS keyboard or phone)
+    char host[128];
+    int port;
+    bool https;
+    setup_parse_server("https://abc.ui.nabu.casa/", host, sizeof(host), &port,
+                       &https);
+    CHECK_STR(host, "abc.ui.nabu.casa");
+    CHECK(port == 443 && https);
+    setup_parse_server(" HTTPS://ha.example.org:8443/x?y ", host,
+                       sizeof(host), &port, &https);
+    CHECK_STR(host, "ha.example.org");
+    CHECK(port == 8443 && https);
+    setup_parse_server("192.168.1.10", host, sizeof(host), &port, &https);
+    CHECK_STR(host, "192.168.1.10");
+    CHECK(port == 8123 && !https);
+    setup_parse_server("http://ha.lan:80", host, sizeof(host), &port, &https);
+    CHECK_STR(host, "ha.lan");
+    CHECK(port == 80 && !https);
 }
 
 // Entities and the states parser
@@ -528,6 +589,15 @@ static void test_config_write(void)
     config_write(&a, buf, sizeof(buf));
     config_defaults(&b);
     CHECK(config_parse(&b, buf, err, sizeof(err)));
+    CHECK(!b.https);
+    CHECK(strstr(buf, "https") == NULL);
+
+    // HTTPS survives a save and load
+    a.https = true;
+    config_write(&a, buf, sizeof(buf));
+    config_defaults(&b);
+    CHECK(config_parse(&b, buf, err, sizeof(err)));
+    CHECK(b.https);
     CHECK_STR(b.host, "10.0.0.5");
     CHECK(b.port == 8124);
     CHECK_STR(b.refresh_token, "ref-123");
@@ -608,6 +678,33 @@ static void test_keyboard(void)
     CHECK_STR(k.text, "10.:");
     tap(&k, 44); // OK
     CHECK(k.done);
+
+    // URL keyboard: ':' and '/' without changing layers, "https://" and
+    // "Clear" keys
+    kbd_init(&k, "Address", "192.168.1.", 40, KBD_URL, false, true);
+    tap(&k, 42); // https://
+    CHECK_STR(k.text, "https://192.168.1.");
+    tap(&k, 42); // Again: removed
+    CHECK_STR(k.text, "192.168.1.");
+    tap(&k, 40); // Clear
+    CHECK_STR(k.text, "");
+    tap(&k, 42); // https://
+    tap(&k, 10); // q
+    tap(&k, 37); // .
+    tap(&k, 10); // q
+    tap(&k, 38); // :
+    tap(&k, 0);  // 1
+    tap(&k, 39); // /
+    CHECK_STR(k.text, "https://q.q:1/");
+    snprintf(k.text, sizeof(k.text), "http://ha.lan");
+    tap(&k, 42); // http:// becomes https://
+    CHECK_STR(k.text, "https://ha.lan");
+    in.down = IN_L; // L doesn't clear the text by accident
+    kbd_update(&k, &in);
+    CHECK_STR(k.text, "https://ha.lan");
+    tap(&k, 41); // The symbols layer is still there
+    tap(&k, 10 + 4); // [
+    CHECK_STR(k.text, "https://ha.lan[");
 }
 
 static void test_picker(void)
@@ -722,6 +819,7 @@ int main(void)
 {
     test_json();
     test_config();
+    test_config_https();
     test_states();
     test_manual_mode();
     test_utf8();

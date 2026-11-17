@@ -53,6 +53,12 @@ static const char *const text_layers[3][KBD_ROWS][KBD_COLS] = {
     },
 };
 
+// URL keyboard: the last letters row has ':' and '/' instead of '_' and '@'
+static const char *const url_row3[2][KBD_COLS] = {
+    { "z", "x", "c", "v", "b", "n", "m", ".", ":", "/" },
+    { "Z", "X", "C", "V", "B", "N", "M", ".", ":", "/" },
+};
+
 static const char *const numeric_keys[KBD_ROWS][3] = {
     { "1", "2", "3" },
     { "4", "5", "6" },
@@ -64,26 +70,32 @@ typedef struct {
     int x, y, w, h;
 } rect;
 
+// Text and URL keyboards share the QWERTY layout
+static bool qwerty(const keyboard *k)
+{
+    return k->mode == KBD_TEXT || k->mode == KBD_URL;
+}
+
 static int cols_in_row(const keyboard *k, int row)
 {
     if (row == KBD_ROWS)
-        return k->mode == KBD_TEXT ? 5 : 2;
-    return k->mode == KBD_TEXT ? KBD_COLS : 3;
+        return qwerty(k) ? 5 : 2;
+    return qwerty(k) ? KBD_COLS : 3;
 }
 
 // Key index for a (row, col) of the D-pad cursor
 static int key_index(const keyboard *k, int row, int col)
 {
     if (row < KBD_ROWS)
-        return k->mode == KBD_TEXT ? row * KBD_COLS + col : row * 3 + col;
-    if (k->mode == KBD_TEXT)
+        return qwerty(k) ? row * KBD_COLS + col : row * 3 + col;
+    if (qwerty(k))
         return KEY_SHIFT + col;
     return col == 0 ? KEY_BACK : KEY_OK;
 }
 
 static bool key_rect(const keyboard *k, int key, rect *r)
 {
-    if (k->mode == KBD_TEXT)
+    if (qwerty(k))
     {
         if (key < 40)
         {
@@ -127,15 +139,22 @@ static bool key_rect(const keyboard *k, int key, rect *r)
 
 static const char *key_label(const keyboard *k, int key)
 {
-    if (k->mode == KBD_TEXT && key < 40)
+    if (qwerty(k) && key < 40)
     {
         int layer = k->layer;
         if (layer == 0 && k->shift_once)
             layer = 1;
+        if (k->mode == KBD_URL && layer < 2 && key / KBD_COLS == 3)
+            return url_row3[layer][key % KBD_COLS];
         return text_layers[layer][key / KBD_COLS][key % KBD_COLS];
     }
     if (k->mode == KBD_NUMERIC && key < 12)
         return numeric_keys[key / 3][key % 3];
+
+    if (k->mode == KBD_URL && key == KEY_SHIFT)
+        return "Clear";
+    if (k->mode == KBD_URL && key == KEY_SPACE)
+        return "https://";
 
     switch (key)
     {
@@ -188,6 +207,27 @@ static void backspace(keyboard *k)
     k->text[len] = '\0';
 }
 
+// The "https://" key: adds the prefix (replacing "http://"), or removes it
+// if it's already there.
+static void toggle_https(keyboard *k)
+{
+    char rest[sizeof(k->text)];
+    const char *v = k->text;
+    bool had = false;
+    if (strncmp(v, "https://", 8) == 0)
+    {
+        v += 8;
+        had = true;
+    }
+    else if (strncmp(v, "http://", 7) == 0)
+        v += 7;
+    snprintf(rest, sizeof(rest), "%s", v);
+    if (had)
+        snprintf(k->text, sizeof(k->text), "%s", rest);
+    else if ((int)(strlen(rest) + 8) <= k->max_len)
+        snprintf(k->text, sizeof(k->text), "https://%s", rest);
+}
+
 static void type_text(keyboard *k, const char *s)
 {
     size_t len = strlen(k->text);
@@ -201,6 +241,17 @@ void kbd_press(keyboard *k, int key)
 {
     if (key < 0)
         return;
+
+    if (k->mode == KBD_URL && key == KEY_SHIFT)
+    {
+        k->text[0] = '\0'; // Clear
+        return;
+    }
+    if (k->mode == KBD_URL && key == KEY_SPACE)
+    {
+        toggle_https(k);
+        return;
+    }
 
     switch (key)
     {
@@ -271,9 +322,9 @@ void kbd_update(keyboard *k, const void *input)
         k->cancelled = true;
     if ((d & IN_Y) && k->password)
         k->reveal = !k->reveal;
-    if (d & IN_L)
+    if ((d & IN_L) && k->mode == KBD_TEXT)
         kbd_press(k, KEY_SHIFT);
-    if ((d & IN_R) && k->mode == KBD_TEXT)
+    if ((d & IN_R) && qwerty(k))
         kbd_press(k, KEY_SYM);
 
     // D-pad cursor
@@ -349,7 +400,8 @@ void kbd_draw(keyboard *k, color_t *top, color_t *bottom)
             continue;
 
         bool special = key >= KEY_SHIFT;
-        bool active = (key == KEY_SHIFT && (k->layer == 1 || k->shift_once))
+        bool active = (key == KEY_SHIFT && k->mode == KBD_TEXT
+                       && (k->layer == 1 || k->shift_once))
                       || (key == KEY_SYM && k->layer == 2);
         color_t bg = key == k->touch_key ? C_ACCENT
                      : key == KEY_OK     ? C_ACCENT
@@ -361,7 +413,7 @@ void kbd_draw(keyboard *k, color_t *top, color_t *bottom)
         gfx_round_rect(bottom, r.x, r.y, r.w, r.h, bg);
         const char *label = key_label(k, key);
         int scale = (!special && k->mode == KBD_NUMERIC) ? 2 : 1;
-        if (!special && k->mode == KBD_TEXT)
+        if (!special && qwerty(k))
             scale = 2;
         int tw = gfx_text_width(label, scale);
         gfx_text(bottom, r.x + (r.w - tw) / 2 + 1,

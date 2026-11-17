@@ -17,12 +17,15 @@
 
 #include <sys/stat.h>
 
+#include <mbedtls/sha256.h>
+
 #include "app.h"
 #include "config.h"
 #include "discover.h"
 #include "ha.h"
 #include "platform.h"
 #include "setup_server.h"
+#include "tls.h"
 #include "validate.h"
 
 // Platform functions
@@ -35,19 +38,30 @@ static void vblank_handler(void)
     vblank_count++;
 }
 
-void platform_yield(void)
-{
-    cothread_yield();
-}
-
-// The DS has no hardware random generator: mix several things that can't be
-// guessed from the network (exact timing of the user's actions, the scanline
-// being drawn, touch screen noise, the clock).
-static uint32_t entropy = 0x9E3779B9;
+// The DS has no good hardware random generator (only the WiFi chip's 11-bit
+// LFSR, which BlocksDS's Mbed TLS uses). DSHA keeps an entropy pool fed with
+// things that can't be guessed from the network: the exact time (in 33 MHz
+// timer ticks) of every network wait, of the user's key presses and touches,
+// touch screen noise, the scanline being drawn and the clock. HTTPS keys mix
+// both (platform_entropy() below is an extra source, see tls.c).
+#define POOL_WORDS 16
+static uint32_t pool[POOL_WORDS];
+static unsigned pool_pos;
+static uint32_t pool_adds;
 
 static void add_entropy(uint32_t v)
 {
-    entropy ^= v + 0x9E3779B9 + (entropy << 6) + (entropy >> 2);
+    uint32_t x = pool[pool_pos] ^ v ^ (pool[(pool_pos + 7) % POOL_WORDS] >> 3);
+    pool[pool_pos] = (x << 7) | (x >> 25);
+    pool_pos = (pool_pos + 1) % POOL_WORDS;
+    pool_adds++;
+}
+
+void platform_yield(void)
+{
+    // When network packets arrive varies by microseconds: a good source
+    add_entropy(cpuGetTiming());
+    cothread_yield();
 }
 
 uint32_t platform_random(void)
@@ -55,14 +69,62 @@ uint32_t platform_random(void)
     add_entropy(REG_VCOUNT);
     add_entropy(vblank_count);
     add_entropy((uint32_t)time(NULL));
-    add_entropy(TIMER_DATA(0) | (TIMER_DATA(1) << 16));
+    add_entropy(cpuGetTiming());
+    uint32_t x = 0;
+    for (int i = 0; i < POOL_WORDS; i++)
+        x = (x << 5 | x >> 27) ^ pool[i];
     // xorshift
-    uint32_t x = entropy;
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
-    entropy = x;
+    add_entropy(x);
     return x;
+}
+
+void platform_entropy(unsigned char *output, size_t len)
+{
+    static uint32_t counter;
+    size_t done = 0;
+    while (done < len)
+    {
+        add_entropy(cpuGetTiming());
+        add_entropy(REG_VCOUNT ^ (vblank_count << 9));
+        add_entropy((uint32_t)time(NULL));
+        counter++;
+
+        unsigned char hash[32];
+        mbedtls_sha256_context sha;
+        mbedtls_sha256_init(&sha);
+        mbedtls_sha256_starts(&sha, 0);
+        mbedtls_sha256_update(&sha, (const unsigned char *)pool, sizeof(pool));
+        mbedtls_sha256_update(&sha, (const unsigned char *)&counter,
+                              sizeof(counter));
+        mbedtls_sha256_update(&sha, (const unsigned char *)&pool_adds,
+                              sizeof(pool_adds));
+        mbedtls_sha256_finish(&sha, hash);
+        mbedtls_sha256_free(&sha);
+
+        size_t n = len - done < 16 ? len - done : 16;
+        // Only half of each hash is output, so the pool state can't be
+        // rebuilt from what an attacker might learn
+        memcpy(output + done, hash, n);
+        done += n;
+        memset(hash, 0, sizeof(hash));
+    }
+}
+
+// The main thread's stack is in DTCM (16 KB). The TLS handshake runs in a
+// cooperative thread with its own stack in main RAM instead.
+int platform_run_big_stack(int (*fn)(void *), void *arg)
+{
+    cothread_t t = cothread_create(fn, arg, 64 * 1024, 0);
+    if (t < 0)
+        return fn(arg);
+    while (!cothread_has_joined(t))
+        cothread_yield();
+    int rc = cothread_get_exit_code(t);
+    cothread_delete(t);
+    return rc;
 }
 
 uint32_t platform_millis(void)
@@ -699,42 +761,67 @@ static void find_server(char *server, size_t server_len)
         if (app.picker.action == 1)
             continue; // Search again
 
-        // Type the address. Start with the first part of the DS's IP.
-        char prefix[32];
-        snprintf(prefix, sizeof(prefix), "%s", inet_ntoa(ip));
-        char *dot = strrchr(prefix, '.');
-        if (dot)
-            dot[1] = '\0';
+        // Type the address. Start with the first part of the DS's IP (the
+        // last address typed, if any).
+        static char typed[128];
+        if (typed[0] == '\0')
+        {
+            snprintf(typed, sizeof(typed), "%s", inet_ntoa(ip));
+            char *dot = strrchr(typed, '.');
+            if (dot)
+                dot[1] = '\0';
+        }
 
-        kbd_init(&app.kbd, "Home Assistant address", prefix, 40, KBD_NUMERIC,
+        kbd_init(&app.kbd, "Home Assistant address", typed, 100, KBD_URL,
                  false, true);
         snprintf(app.kbd.hint, sizeof(app.kbd.hint),
-                 "Type the IP address of Home Assistant, like 192.168.1.10. "
-                 "Add :port at the end if it isn't 8123.");
+                 "Its IP address, like 192.168.1.10 (add :port if it isn't "
+                 "8123), or its https:// address, like "
+                 "https://xxxx.ui.nabu.casa");
         if (!run_keyboard())
             continue;
+        snprintf(typed, sizeof(typed), "%s", app.kbd.text);
 
         char host[128];
         int port;
-        setup_parse_server(app.kbd.text, host, sizeof(host), &port);
-        snprintf(body, sizeof(body), "Checking %s:%d...", host, port);
+        bool https;
+        setup_parse_server(app.kbd.text, host, sizeof(host), &port, &https);
+        if (host[0] == '\0' || !valid_host(host))
+        {
+            message_wait("Not a valid address",
+                         "Type an IP address like 192.168.1.10, or an "
+                         "address like https://my.domain.", "A: try again",
+                         true, KEY_A);
+            continue;
+        }
+        static ha_config addr; // Big (entity list): not on the stack
+        config_defaults(&addr);
+        snprintf(addr.host, sizeof(addr.host), "%s", host);
+        addr.port = port;
+        addr.https = https;
+        config_server_url(&addr, server, server_len);
+        snprintf(body, sizeof(body), "Checking %s...%s", server,
+                 https ? "\n\nThe first secure (HTTPS) connection takes a "
+                         "few seconds." : "");
         show_status("Looking for Home Assistant", body);
 
         static http_client c;
-        http_client_init(&c, host, port);
+        http_client_init_url(&c, host, port, https);
         c.timeout_ms = 4000;
         bool ok = auth_probe(&c);
         http_client_close(&c);
         if (ok)
-        {
-            snprintf(server, server_len, "%s:%d", host, port);
             return;
-        }
 
-        snprintf(body, sizeof(body),
-                 "There's no Home Assistant at %s:%d.\n\n"
-                 "Check the address. HTTPS isn't supported, the DS needs the "
-                 "local http:// address.", host, port);
+        if (c.last_error[0] != '\0')
+            snprintf(body, sizeof(body), "%s\n\nCheck the address%s.",
+                     c.last_error,
+                     https ? "" : " (for HTTPS, start it with https://)");
+        else
+            snprintf(body, sizeof(body),
+                     "There's no Home Assistant at %s.\n\n"
+                     "Check the address%s.", server,
+                     https ? "" : " (for HTTPS, start it with https://)");
         message_wait("Not found", body, "A: try again", true, KEY_A);
     }
 }
@@ -900,7 +987,7 @@ static void run_setup(bool wifi_connected)
     {
         if (ha.signed_out && cfg.host[0] != '\0')
         {
-            snprintf(server, sizeof(server), "%s:%d", cfg.host, cfg.port);
+            config_server_url(&cfg, server, sizeof(server));
             ha.signed_out = false;
         }
         else
@@ -1004,13 +1091,14 @@ static void load_progress(void *user, int done, int total)
         return;
     last_draw = platform_millis();
 
+    char server[160];
+    config_server_url(&cfg, server, sizeof(server));
     if (total > 0)
-        snprintf(body, sizeof(body), "Server: %s:%d\n\nEntity %d of %d",
-                 cfg.host, cfg.port, done, total);
+        snprintf(body, sizeof(body), "Server: %s\n\nEntity %d of %d",
+                 server, done, total);
     else
         snprintf(body, sizeof(body),
-                 "Server: %s:%d\n\nReceived %d states (%lu KB)", cfg.host,
-                 cfg.port, done,
+                 "Server: %s\n\nReceived %d states (%lu KB)", server, done,
                  (unsigned long)(ha.http.bytes_received / 1024));
     app_show_message(&app, "Loading entities", body,
                      "Hold START+SELECT to exit", false, true);
@@ -1021,11 +1109,17 @@ static void load_progress(void *user, int done, int total)
 static ha_status connect_ha(void)
 {
     char body[384];
+    char server[160];
+    config_server_url(&cfg, server, sizeof(server));
 
     while (1)
     {
-        snprintf(body, sizeof(body), "Server: %s:%d\nDS IP: %s",
-                 cfg.demo ? "demo" : cfg.host, cfg.port, app.ip);
+        snprintf(body, sizeof(body), "Server: %s\nDS IP: %s%s",
+                 cfg.demo ? "demo" : server, app.ip,
+                 cfg.https && !cfg.demo && ha.http.tls_conn == NULL
+                     ? "\n\nSecure connection (HTTPS): this takes a few "
+                       "seconds."
+                     : "");
         show_status("Connecting to Home Assistant", body);
 
         http_client_close(&ha.http);
@@ -1059,11 +1153,12 @@ static ha_status connect_ha(void)
             return HA_RUN_SETUP;
 
         snprintf(body, sizeof(body),
-                 "%s\n\nServer: %s:%d\n\n"
-                 "Use the IP address of Home Assistant, not "
-                 "homeassistant.local. HTTPS isn't supported: use the local "
-                 "http:// address.",
-                 ha.error, cfg.host, cfg.port);
+                 "%s\n\nServer: %s\n\n%s", ha.error, server,
+                 cfg.https ? "Check the address, and that Home Assistant is "
+                             "reachable at it from your network."
+                           : "Use the IP address of Home Assistant, not "
+                             "homeassistant.local, or its https:// "
+                             "address.");
         uint32_t k = message_wait("Can't load Home Assistant", body,
                                   "A: retry   X: set up again", true,
                                   KEY_A | KEY_X);
@@ -1092,6 +1187,9 @@ int main(int argc, char *argv[])
     irqSet(IRQ_VBLANK, vblank_handler);
     irqEnable(IRQ_VBLANK);
 
+    // Free running 33 MHz counter (timers 0 and 1), for the entropy pool
+    cpuStartTiming(0);
+
     app_init(&app, &cfg, &ha);
     config_defaults(&cfg);
     update_clock();
@@ -1109,6 +1207,28 @@ int main(int argc, char *argv[])
 
     config_status status = load_config();
     bool need_setup = status != CONFIG_LOADED;
+
+    // Extra HTTPS certificates to trust (self-signed, or a private CA)
+    static const char *const ca_paths[] = {
+        "sd:/dsha/ca.pem", "fat:/dsha/ca.pem", NULL,
+    };
+    for (int i = 0; ca_paths[i] != NULL; i++)
+    {
+        FILE *f = fopen(ca_paths[i], "rb");
+        if (f == NULL)
+            continue;
+        fclose(f);
+        if (!tls_set_ca_file(ca_paths[i]))
+        {
+            char body[160];
+            snprintf(body, sizeof(body),
+                     "%s isn't a valid PEM certificate file. It's ignored.",
+                     ca_paths[i]);
+            message_wait("Certificate file", body, "A: continue", true,
+                         KEY_A);
+        }
+        break;
+    }
 
     if (status == CONFIG_LOADED && cfg.demo)
         run_demo(); // Returns if the user asks for the setup

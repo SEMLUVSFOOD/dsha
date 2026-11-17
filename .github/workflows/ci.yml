@@ -18,7 +18,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: Run unit and network tests
+      - name: Build Mbed TLS 3.6 (Ubuntu only has 2.28)
+        run: sh tests/get_mbedtls.sh
+      - name: Run unit and network tests (HTTP and HTTPS)
         run: make -C tests test
 
   integration:
@@ -91,6 +93,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      - name: Install Mbed TLS for BlocksDS
+        run: wf-pacman -Sy --noconfirm blocksds-mbedtls
       - name: Build
         run: make
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

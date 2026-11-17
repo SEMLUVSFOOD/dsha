@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "config.h"
 #include "validate.h"
@@ -50,14 +51,25 @@ static void lowercase(char *s)
         *s = (char)tolower((unsigned char)*s);
 }
 
-// Accepts "http://host:port/" style URLs as well as plain hosts.
+// Accepts "http://host:port/" and "https://host/" style URLs as well as
+// plain hosts. https:// turns on TLS, with port 443 if none is given.
 static void parse_host(ha_config *cfg, const char *value)
 {
     const char *v = value;
-    if (strncmp(v, "http://", 7) == 0)
+    bool https = false;
+    if (strncasecmp(v, "http://", 7) == 0)
         v += 7;
-    else if (strncmp(v, "https://", 8) == 0)
-        v += 8; // TLS isn't supported, but be forgiving with the syntax
+    else if (strncasecmp(v, "https://", 8) == 0)
+    {
+        v += 8;
+        https = true;
+    }
+    if (https || v != value)
+    {
+        cfg->https = https;
+        if (https)
+            cfg->port = 443;
+    }
 
     char tmp[128];
     copy_str(tmp, sizeof(tmp), v);
@@ -142,6 +154,9 @@ bool config_parse(ha_config *cfg, const char *text, char *err, size_t errlen)
             parse_host(cfg, value);
         else if (strcmp(key, "port") == 0)
             cfg->port = atoi(value);
+        else if (strcmp(key, "https") == 0 || strcmp(key, "tls") == 0)
+            cfg->https = strcmp(value, "1") == 0 || strcmp(value, "true") == 0
+                         || strcmp(value, "yes") == 0;
         else if (strcmp(key, "token") == 0)
             copy_str(cfg->token, sizeof(cfg->token), value);
         else if (strcmp(key, "refresh_token") == 0)
@@ -264,6 +279,8 @@ size_t config_write(const ha_config *in, char *out, size_t out_len)
         PUT("demo = 1\n");
     if (cfg->host[0])
         PUT("host = %s\nport = %d\n", cfg->host, cfg->port);
+    if (cfg->host[0] && cfg->https)
+        PUT("https = 1\n");
     if (cfg->token[0])
         PUT("token = %s\n", cfg->token);
     if (cfg->refresh_token[0])
@@ -291,6 +308,16 @@ size_t config_write(const ha_config *in, char *out, size_t out_len)
     if (len >= out_len)
         len = out_len - 1;
     return len;
+}
+
+void config_server_url(const ha_config *cfg, char *out, size_t out_len)
+{
+    if (!cfg->https)
+        snprintf(out, out_len, "%s:%d", cfg->host, cfg->port);
+    else if (cfg->port == 443)
+        snprintf(out, out_len, "https://%s", cfg->host);
+    else
+        snprintf(out, out_len, "https://%s:%d", cfg->host, cfg->port);
 }
 
 bool config_save_file(const ha_config *cfg, const char *path)

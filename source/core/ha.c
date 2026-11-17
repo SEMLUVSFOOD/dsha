@@ -36,7 +36,7 @@ static ha_state_parser state_parser;
 void ha_init(ha_client *ha, const ha_config *cfg)
 {
     memset(ha, 0, sizeof(*ha));
-    http_client_init(&ha->http, cfg->host, cfg->port);
+    http_client_init_url(&ha->http, cfg->host, cfg->port, cfg->https);
     ha->http.allow_public = cfg->allow_public_server;
     snprintf(ha->headers, sizeof(ha->headers),
              "Authorization: Bearer %s\r\n", cfg->token);

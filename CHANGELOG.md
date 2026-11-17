@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.3.0 — 2026-11-17
+
+- **HTTPS.** Sign in to Home Assistant at an `https://` address: Nabu Casa
+  remote access (`https://xxxx.ui.nabu.casa`), DuckDNS, your own domain or a
+  reverse proxy, or Home Assistant itself with `ssl_certificate`. TLS 1.2 and
+  1.3 with Mbed TLS. The certificate is always verified, against the root
+  certificates of the common authorities (Let's Encrypt, Google Trust
+  Services, Sectigo/ZeroSSL, DigiCert, Amazon, GlobalSign, GoDaddy, SSL.com,
+  Microsoft) and, optionally, your own in `/dsha/ca.pem` (self-signed
+  certificates, private CAs).
+- **New address keyboard** in the setup: letters, `:` and `/` on the same
+  page, an `https://` key and a *Clear* key. It used to only allow digits.
+- The phone sign in page accepts `https://` addresses too, and both show why
+  a server couldn't be reached (certificate problem, not HTTPS, timeout...).
+- `https = 1` in `config.ini` (written by the setup), or `host =
+  https://...`. `https://` addresses use port 443 unless another one is given.
+- Non-local servers are allowed over HTTPS (they're still refused over plain
+  HTTP).
+- The first HTTPS connection takes a few seconds on a DS; it's kept open
+  afterwards. The handshake runs on its own 64 KB stack.
+- Better randomness for the keys: an entropy pool of network and input
+  timings, mixed with Mbed TLS's own source.
+
+### Development
+
+- Desktop tests now run the whole network suite over HTTPS as well (TLS 1.3
+  and 1.2, EC and RSA certificates, wrong name, unknown authority), with
+  AddressSanitizer and UBSan. They need Mbed TLS 3.6: `tests/get_mbedtls.sh`
+  builds it.
+- The build needs BlocksDS's `blocksds-mbedtls` package (`make docker`
+  installs it).
+- Releases check that the tag matches the version, and use the changelog as
+  release notes.
+
 ## 1.2.0 — 2026-11-16
 
 - New **Home Assistant integration** (`custom_components/dsha`, installable

@@ -36,8 +36,20 @@ void http_client_init(http_client *c, const char *host, int port)
     c->fd = -1;
 }
 
+void http_client_init_url(http_client *c, const char *host, int port,
+                          bool tls)
+{
+    http_client_init(c, host, port);
+    c->tls = tls;
+}
+
 void http_client_close(http_client *c)
 {
+    if (c->tls_conn != NULL)
+    {
+        tls_close(c->tls_conn);
+        c->tls_conn = NULL;
+    }
     if (c->fd >= 0)
     {
         shutdown(c->fd, SHUT_RDWR);
@@ -81,12 +93,13 @@ static bool resolve(http_client *c, http_result *res)
         freeaddrinfo(result);
     }
 
-    if (!c->allow_public && !is_private_ipv4(ntohl(sin.sin_addr.s_addr)))
+    if (!c->tls && !c->allow_public
+        && !is_private_ipv4(ntohl(sin.sin_addr.s_addr)))
     {
         // The connection isn't encrypted: never send credentials over the
         // internet in clear text.
-        set_error(res, "%s isn't on your local network. DSHA only talks to "
-                       "local servers (no HTTPS).", c->host);
+        set_error(res, "%s isn't on your local network. Use its https:// "
+                       "address.", c->host);
         return false;
     }
 
@@ -164,7 +177,44 @@ static bool do_connect(http_client *c, http_result *res)
     }
 
     c->fd = fd;
+
+    if (c->tls)
+    {
+        char err[128];
+        c->tls_conn = tls_connect(fd, c->host, c->timeout_ms, err,
+                                  sizeof(err));
+        if (c->tls_conn == NULL)
+        {
+            http_client_close(c);
+            set_error(res, "%s", err);
+            return false;
+        }
+    }
     return true;
+}
+
+// send()/recv() on the socket, or through TLS. They return -1 with errno set
+// to EAGAIN when they would block, like the socket functions.
+static int conn_send(http_client *c, const char *data, size_t len)
+{
+    if (c->tls_conn == NULL)
+        return (int)send(c->fd, data, len, 0);
+    int n = tls_write(c->tls_conn, data, len);
+    if (n >= 0)
+        return n;
+    errno = n == TLS_AGAIN ? EAGAIN : ECONNRESET;
+    return -1;
+}
+
+static int conn_recv(http_client *c, char *buf, size_t len)
+{
+    if (c->tls_conn == NULL)
+        return (int)recv(c->fd, buf, len, 0);
+    int n = tls_read(c->tls_conn, buf, len);
+    if (n >= 0)
+        return n;
+    errno = n == TLS_AGAIN ? EAGAIN : ECONNRESET;
+    return -1;
 }
 
 static bool send_all(http_client *c, const char *data, size_t len)
@@ -173,7 +223,7 @@ static bool send_all(http_client *c, const char *data, size_t len)
 
     while (len > 0)
     {
-        int n = send(c->fd, data, len, 0);
+        int n = conn_send(c, data, len);
         if (n > 0)
         {
             data += n;
@@ -519,7 +569,7 @@ static int attempt(http_client *c, const char *request, size_t request_len,
 
     while (1)
     {
-        int n = recv(c->fd, buf, sizeof(buf), 0);
+        int n = conn_recv(c, buf, sizeof(buf));
 
         if (n > 0)
         {
@@ -634,9 +684,10 @@ bool http_request_ex(http_client *c, const char *method, const char *path,
 
     res->status = 0;
     res->error[0] = '\0';
+    c->last_error[0] = '\0';
 
     char host_header[160];
-    if (c->port == 80)
+    if (c->port == (c->tls ? 443 : 80))
         snprintf(host_header, sizeof(host_header), "%s", c->host);
     else
         snprintf(host_header, sizeof(host_header), "%s:%d", c->host, c->port);
@@ -682,7 +733,7 @@ bool http_request_ex(http_client *c, const char *method, const char *path,
         if (!reused)
         {
             if (!do_connect(c, res))
-                return false;
+                goto fail;
             if (tries > 0)
                 c->reconnects++;
         }
@@ -700,10 +751,12 @@ bool http_request_ex(http_client *c, const char *method, const char *path,
             return true;
         }
         if (r == ATTEMPT_FAIL)
-            return false;
+            goto fail;
         // ATTEMPT_RETRY: loop again with a new connection
     }
 
     set_error(res, "Can't talk to %s", c->host);
+fail:
+    snprintf(c->last_error, sizeof(c->last_error), "%s", res->error);
     return false;
 }

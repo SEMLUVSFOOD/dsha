@@ -36,3 +36,18 @@ uint32_t platform_random(void)
     }
     return v ^ platform_millis();
 }
+
+void platform_entropy(unsigned char *out, size_t len)
+{
+    FILE *f = fopen("/dev/urandom", "rb");
+    size_t n = f ? fread(out, 1, len, f) : 0;
+    if (f)
+        fclose(f);
+    for (; n < len; n++)
+        out[n] = (unsigned char)platform_millis(); // Not reached in practice
+}
+
+int platform_run_big_stack(int (*fn)(void *), void *arg)
+{
+    return fn(arg); // Desktop threads have megabytes of stack
+}

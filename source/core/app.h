@@ -17,7 +17,7 @@
 #include "ha.h"
 #include "widgets.h"
 
-#define DSHA_VERSION "1.2.0"
+#define DSHA_VERSION "1.3.0"
 
 // Logical buttons (the platform maps hardware keys to these)
 enum {
